@@ -35,6 +35,44 @@ import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
 
+class HeightsEncoder(nn.Module):
+    def __init__(self, activation):
+        super().__init__()
+        self.n_heights = 52
+        self.n_legs = 4
+        self.net = nn.Sequential(
+            nn.Linear(self.n_heights, 80),
+            activation,
+            nn.Linear(80,60),
+            activation,
+            nn.Linear(60, 24),
+            nn.Tanh()
+        )
+
+    def forward(self, heights):
+        n_envs = heights.shape[0]
+        return self.net(heights.view(n_envs, self.n_legs, self.n_heights))
+    
+class PriviligedEncoder(nn.Module):
+    def __init__(self, activation):
+        super().__init__()
+        foot_contacts = 4
+        thigh_contacts = 4
+        shank_contacts = 4
+        airtime = 4
+        size_in = foot_contacts + thigh_contacts + shank_contacts + airtime
+        self.net = nn.Sequential(
+            nn.Linear(size_in, 64),
+            activation,
+            nn.Linear(64, 32),
+            activation,
+            nn.Linear(32, 24),
+            nn.Tanh()
+        )
+
+    def forward(self, priviliged_info):
+        return self.net(priviliged_info)
+
 class ActorCritic(nn.Module):
     is_recurrent = False
     def __init__(self,  num_actor_obs,
@@ -54,16 +92,12 @@ class ActorCritic(nn.Module):
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
 
-        self.heights_encoder = nn.Sequential(
-            nn.Linear(52, 80),
-            activation,
-            nn.Linear(80,60),
-            activation,
-            nn.Linear(60, 24),
-            activation
-        )
+        self.heights_encoder = HeightsEncoder(activation)
+        self.priviliged_encoder = PriviligedEncoder(activation)
 
-        mlp_input_dim_a = mlp_input_dim_a - 4 * 52 + 24*4
+        # mlp_input_dim_a = 6 + 3 + 3 + 12 + 12 + 12 + 24 + 4*24
+        mlp_input_dim_a = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 12 + 24 + 4*24
+        mlp_input_dim_c = mlp_input_dim_a
 
         # Policy
         actor_layers = []
@@ -93,7 +127,7 @@ class ActorCritic(nn.Module):
         print(f"Critic MLP: {self.critic}")
 
         # Action noise
-        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        self.std = nn.Parameter(0 * init_noise_std * torch.ones(num_actions))
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
@@ -108,6 +142,33 @@ class ActorCritic(nn.Module):
         [torch.nn.init.orthogonal_(module.weight, gain=scales[idx]) for idx, module in
          enumerate(mod for mod in sequential if isinstance(mod, nn.Linear))]
 
+    def preprocess_input(self, observation):
+        # measured velocity, orientation, command, joint_pos_res, joint_velocity, last_action
+        # PROPRIOCEPTIVE_SIZE = 6 + 3 + 3 + 12 + 12 + 12
+        PROPRIOCEPTIVE_SIZE = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 12
+        PROPRIOCEPTIVE_START = 0
+
+        # print("[Preprocess input] | observation shape:", observation.shape)
+
+        # 4 x 52 height samples
+        HEIGHTS_SCAN_SIZE = 4 * 52
+        HEIGHTS_START = PROPRIOCEPTIVE_SIZE
+
+        # foot contacts, thigh contacs, shank contacts, airtime
+        PRIVILIGED_SIZE = 4 + 4 + 4 + 4
+        PRIVILIGED_START = PROPRIOCEPTIVE_SIZE + HEIGHTS_SCAN_SIZE
+
+        n_envs = observation.shape[0]
+        heights_encoded = self.heights_encoder(observation[:, HEIGHTS_START:PRIVILIGED_START]).reshape(n_envs, -1)
+
+        priviliged_encoded = self.priviliged_encoder(observation[:, PRIVILIGED_START:])
+
+        obs = torch.cat([
+            observation[:, PROPRIOCEPTIVE_START:HEIGHTS_START],
+            heights_encoded,
+            priviliged_encoded
+        ], dim = 1)
+        return obs
 
     def reset(self, dones=None):
         pass
@@ -128,24 +189,11 @@ class ActorCritic(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def get_mean(self, observation):
-        heights = observation[:, -4*52:]
-        n_envs = observation.shape[0]
-        heights = heights.reshape(n_envs, 4, 52)
-        heights_encoded = self.heights_encoder(heights)
-        heights_encoded = heights_encoded.reshape(n_envs, -1)
-
-
-        # print(heights_encoded.shape)
-        # print(observation.shape)
-        obs = torch.cat([
-            observation[:, :-4*52],
-            heights_encoded
-        ], dim = 1)
-        return self.actor(obs)
+        return self.actor(self.preprocess_input(observation))
 
     def update_distribution(self, observations):
         mean = self.get_mean(observation=observations)
-        self.distribution = Normal(mean, mean*0. + self.std)
+        self.distribution = Normal(mean, mean*0. + self.std.exp())
 
     def act(self, observations, **kwargs):
         self.update_distribution(observations)
@@ -158,9 +206,8 @@ class ActorCritic(nn.Module):
         actions_mean = self.get_mean(observation=observations)
         return actions_mean
 
-    def evaluate(self, critic_observations, **kwargs):
-        value = self.critic(critic_observations)
-        return value
+    def evaluate(self, observation, **kwargs):
+        return self.critic(self.preprocess_input(observation))
 
 def get_activation(act_name):
     if act_name == "elu":

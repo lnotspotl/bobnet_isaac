@@ -76,6 +76,9 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
+        self.iter = 0.0
+        self.ck = 0.0
+
     def step(self, actions):
         """ Apply actions, simulate, call self.post_physics_step()
 
@@ -121,6 +124,9 @@ class LeggedRobot(BaseTask):
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         self.contacts[:] = torch.norm(self.contact_forces[:, self.feet_indices, :3], dim=2) >= 0.3
 
+        self.shank_contacts[:] = torch.norm(self.contact_forces[:, self.shank_indices, :3], dim=2) >= 0.3
+        self.thigh_contacts[:] = torch.norm(self.contact_forces[:, self.thigh_indices, :3], dim=2) >= 0.3
+
         self._post_physics_step_callback()
 
         # compute observations, rewards, resets, ...
@@ -128,11 +134,26 @@ class LeggedRobot(BaseTask):
         self.compute_reward()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
+
+        # Update last action history buffer
+        self.dof_action_history[self.dof_action_idx, :] = self.actions[:]
+        self.dof_action_idx = (self.dof_action_idx + 1) % self.dof_action_history_length
+        
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
-        self.last_root_vel[:] = self.root_states[:, 7:13]
+        # self.last_root_vel[:] = self.root_states[:, 7:13]
+
+        # update DOF residual history buffer
+        self.dof_residuals_history[self.dof_residual_idx, :] = self.dof_pos[:] - self.default_dof_pos
+        self.dof_residual_idx = (self.dof_residual_idx + 1) % self.dof_residuals_history_length
+
+        # Update DOF velocity history buffer
+        self.dof_velocity_history[self.dof_velocity_idx, :] = self.dof_vel[:]
+        self.dof_velocity_idx = (self.dof_velocity_idx + 1) % self.dof_velocity_history_length
+
+        self.update_curriculum()
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
@@ -175,6 +196,7 @@ class LeggedRobot(BaseTask):
         self.feet_air_time[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+
         # fill extras
         self.extras["episode"] = {}
         for key in self.episode_sums.keys():
@@ -211,20 +233,49 @@ class LeggedRobot(BaseTask):
     def compute_observations(self):
         """ Computes observations
         """
-        self.obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
-                                    self.base_ang_vel  * self.obs_scales.ang_vel,
-                                    self.projected_gravity,
-                                    self.commands[:, :3] * self.commands_scale,
-                                    self.dof_pos * self.obs_scales.dof_pos,
-                                    # (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
-                                    self.dof_vel * self.obs_scales.dof_vel,
-                                    self.contacts,
-                                    self.actions
+
+        def buffer_indeces(ptr_idx, size):
+            ptr_idx = (ptr_idx - 1) % size
+            return [(ptr_idx + i) % size for i in range(size)]
+        
+        # print("DOF residual index:", self.dof_residual_idx)
+
+        dof_res_indices = buffer_indeces(self.dof_residual_idx, self.dof_residuals_history_length)
+        vel_indices = buffer_indeces(self.dof_velocity_idx, self.dof_velocity_history_length)
+        act_indices = buffer_indeces(self.dof_action_idx, self.dof_action_history_length)
+
+        # Proprioception
+        self.obs_buf = torch.cat((
+                                    self.commands[:, :3] * self.commands_scale,  # command
+                                    self.projected_gravity,   # body orientation
+                                    self.base_lin_vel * self.obs_scales.lin_vel,  # body velocity
+                                    self.base_ang_vel  * self.obs_scales.ang_vel,  # body velocity
+                                    (self.dof_pos  - self.default_dof_pos) * self.obs_scales.dof_pos,  # joint position
+                                    self.dof_vel * self.obs_scales.dof_vel, # joint velocity
+                                    *[self.dof_residuals_history[idx] * self.obs_scales.dof_pos for idx in dof_res_indices],  # joint position history
+                                    *[self.dof_velocity_history[idx] * self.obs_scales.dof_vel for idx in vel_indices],     # joint velocity history
+                                    *[self.dof_action_history[idx] for idx in act_indices],   # joint target history
                                     ),dim=-1)
-        # add perceptive inputs if not blind
+        
+        # print("Base lin vel shape:", self.base_lin_vel.shape)
+        # print("Base ang vel shape:", self.base_ang_vel.shape)
+        # print("DOF residual indeces:", dof_res_indices)
+        # print("DOF velocity indices:", vel_indices)
+        # print("DOF action indices:", act_indices)
+        # print("DOF residual [0] shape:", self.dof_residuals_history[0].shape)
+        # print("Observation shape (no heights and priviliged)", self.obs_buf.shape)
+        # Height samples
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
             self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
+
+        # print("Observation shape (no priviliged):", self.obs_buf.shape)
+
+        # Priviliged information
+        self.obs_buf = torch.cat((self.obs_buf, self.contacts, self.thigh_contacts, self.shank_contacts, self.feet_air_time), dim=-1)
+        
+        # print("Observation shape:", self.obs_buf.shape)
+
         # add noise if needed
         if self.add_noise:
             self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
@@ -506,12 +557,47 @@ class LeggedRobot(BaseTask):
 
         # contacts
         self.contacts = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float32)
+        self.shank_contacts = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float32)
+        self.thigh_contacts = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float32)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
+
+        # DOF residuals history
+        DOF_RESIDUAL_HISTORY_LENGTH = 3
+        DOF_RESIDUAL_BUFFER_SIZE = (DOF_RESIDUAL_HISTORY_LENGTH, self.num_envs, 12)
+        self.dof_residuals_history = torch.zeros(
+            DOF_RESIDUAL_BUFFER_SIZE, dtype=torch.float, device=self.device, requires_grad=False
+        )
+
+        self.dof_residuals_history_length = DOF_RESIDUAL_HISTORY_LENGTH
+        self.dof_residual_idx = 0
+
+        # DOF velocity history
+        DOF_VELOCITY_HISTORY_LENGTH = 2
+        DOF_VELOCITY_BUFFER_SIZE = (DOF_VELOCITY_HISTORY_LENGTH, self.num_envs, 12)
+        self.dof_velocity_history = torch.zeros(
+            DOF_VELOCITY_BUFFER_SIZE, dtype=torch.float, device=self.device, requires_grad=False
+        )
+
+        self.dof_velocity_history_length = DOF_VELOCITY_HISTORY_LENGTH
+        self.dof_velocity_idx = 0
+
+        # Action history
+        DOF_ACTION_HISTORY_LENGTH = 2
+        DOF_ACTION_BUFFER_SIZE = (DOF_ACTION_HISTORY_LENGTH, self.num_envs, self.num_actions)
+        self.dof_action_history = torch.zeros(
+            DOF_ACTION_BUFFER_SIZE, dtype=torch.float, device=self.device, requires_grad=False
+        )
+
+        # 
+
+        self.dof_action_history_length = DOF_ACTION_HISTORY_LENGTH
+        self.dof_action_idx = 0
+
         self.base_quat = self.root_states[:, 3:7]
 
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
@@ -528,7 +614,7 @@ class LeggedRobot(BaseTask):
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
-        self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
+        # self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
         self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,) # TODO change this
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
@@ -678,6 +764,7 @@ class LeggedRobot(BaseTask):
         for name in self.cfg.asset.terminate_after_contacts_on:
             termination_contact_names.extend([s for s in body_names if name in s])
 
+
         base_init_state_list = self.cfg.init_state.pos + self.cfg.init_state.rot + self.cfg.init_state.lin_vel + self.cfg.init_state.ang_vel
         self.base_init_state = to_torch(base_init_state_list, device=self.device, requires_grad=False)
         start_pose = gymapi.Transform()
@@ -709,6 +796,18 @@ class LeggedRobot(BaseTask):
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])
+        
+        # shank names
+        shank_names = [s for s in body_names if self.cfg.asset.shank_name in s]
+        self.shank_indices = torch.zeros(len(shank_names), dtype=torch.long, device=self.device, requires_grad=False)
+        for i in range(len(shank_names)):
+            self.shank_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], shank_names[i])
+
+        # thigh names
+        thigh_names = [s for s in body_names if self.cfg.asset.thigh_name in s]
+        self.thigh_indices = torch.zeros(len(thigh_names), dtype=torch.long, device=self.device, requires_grad=False)
+        for i in range(len(thigh_names)):
+            self.shank_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], thigh_names[i])
 
         self.penalised_contact_indices = torch.zeros(len(penalized_contact_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(penalized_contact_names)):
@@ -958,3 +1057,15 @@ class LeggedRobot(BaseTask):
     def _reward_feet_contact_forces(self):
         # penalize high contact forces
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) -  self.cfg.rewards.max_contact_force).clip(min=0.), dim=1)
+    
+    def _reward_smoothness(self):
+        diff1 = self.actions[:, :] - self.dof_action_history[0, :, :]
+        diff2 = self.actions[:, :] - 2.0 * self.dof_action_history[0, :, :] + self.dof_action_history[1, :, :]
+        return self.ck * (diff1.square().sum(dim=1) + diff2.square().sum(dim=1))
+
+    def update_curriculum(self):
+        self.iter += 1.0
+
+        if self.iter == 10000.0:
+            print("Done curriculum")
+        self.ck = min(self.iter / 10000, 1.0)

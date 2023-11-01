@@ -72,6 +72,8 @@ class AnymalCRoughCfg( LeggedRobotCfg ):
         file = "/home/kuba/fun/anymal_rl/resources/anymal_c/urdf/anymal_c.urdf"
         name = "anymal_c"
         foot_name = "FOOT"
+        shank_name = "SHANK"
+        thigh_name = "THIGH"
         penalize_contacts_on = ["SHANK", "THIGH"]
         terminate_after_contacts_on = ["base"]
         self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
