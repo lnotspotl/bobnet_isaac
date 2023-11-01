@@ -21,3 +21,4 @@ var/
 *.egg
 
 logs/
+resources/
