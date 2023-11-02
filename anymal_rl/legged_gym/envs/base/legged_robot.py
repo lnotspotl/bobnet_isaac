@@ -266,13 +266,38 @@ class LeggedRobot(BaseTask):
         # print("Observation shape (no heights and priviliged)", self.obs_buf.shape)
         # Height samples
         if self.cfg.terrain.measure_heights:
+            # Heights w.r.t. base
+            # heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+
+            # Heights w.r.t. feet
+            # heights = self.measured_heights
+            # n_points = heights.shape[1]
+            # n_points_per_leg = n_points // 4
+            # heights[:, 0 * n_points_per_leg: 0 * n_points_per_leg + n_points_per_leg] - self.lf_foot_position[:, 2].unsqueeze(1)
+            # heights[:, 1 * n_points_per_leg: 1 * n_points_per_leg + n_points_per_leg] - self.lh_foot_position[:, 2].unsqueeze(1)
+            # heights[:, 2 * n_points_per_leg: 2 * n_points_per_leg + n_points_per_leg] - self.rf_foot_position[:, 2].unsqueeze(1)
+            # heights[:, 3 * n_points_per_leg: 3 * n_points_per_leg + n_points_per_leg] - self.rh_foot_position[:, 2].unsqueeze(1)
+            # heights = torch.clip(heights, -1, 1) * self.obs_scales.height_measurements
+
+            # heights.shape == [num_envs, 208]
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+
             self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
+
 
         # print("Observation shape (no priviliged):", self.obs_buf.shape)
 
+
+        # Contact forces expressed in the body frame
+
+
         # Priviliged information
-        self.obs_buf = torch.cat((self.obs_buf, self.contacts, self.thigh_contacts, self.shank_contacts, self.feet_air_time), dim=-1)
+        self.obs_buf = torch.cat((self.obs_buf, self.contacts, self.thigh_contacts, self.shank_contacts, self.feet_air_time, self.friction_coeffs.squeeze(2)), dim=-1)
+
+        for i in range(4):
+            contact_force_world = self.contact_forces[:, self.feet_indices[i], :]
+            contact_force_body = quat_rotate_inverse(self.base_quat.repeat(1, self.num_envs), contact_force_world) * self.obs_scales.contact_forces
+            self.obs_buf = torch.cat((self.obs_buf, contact_force_body), dim=-1)
         
         # print("Observation shape:", self.obs_buf.shape)
 
@@ -318,6 +343,7 @@ class LeggedRobot(BaseTask):
         Returns:
             [List[gymapi.RigidShapeProperties]]: Modified rigid shape properties
         """
+
         if self.cfg.domain_rand.randomize_friction:
             if env_id==0:
                 # prepare friction randomization
@@ -329,6 +355,11 @@ class LeggedRobot(BaseTask):
 
             for s in range(len(props)):
                 props[s].friction = self.friction_coeffs[env_id]
+
+        else:
+            if env_id == 0:
+                self.friction_coeffs = torch.ones(self.num_envs).unsqueeze(1).unsqueeze(1)
+
         return props
 
     def _process_dof_props(self, props, env_id):
@@ -817,6 +848,8 @@ class LeggedRobot(BaseTask):
         for i in range(len(termination_contact_names)):
             self.termination_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], termination_contact_names[i])
 
+        self.friction_coeffs = self.friction_coeffs.to(self.device)
+
     def _get_env_origins(self):
         """ Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
             Otherwise create a grid.
@@ -957,12 +990,12 @@ class LeggedRobot(BaseTask):
         py = torch.clip(py, 0, self.height_samples.shape[1]-2)
 
         heights1 = self.height_samples[px, py]
-        heights2 = self.height_samples[px+1, py]
-        heights3 = self.height_samples[px, py+1]
-        heights = torch.min(heights1, heights2)
-        heights = torch.min(heights, heights3)
+        # heights2 = self.height_samples[px+1, py]
+        # heights3 = self.height_samples[px, py+1]
+        # heights = torch.min(heights1, heights2)
+        # heights = torch.min(heights, heights3)
 
-        return heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
+        return heights1.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
 
     #------------ reward functions----------------
     def _reward_lin_vel_z(self):
@@ -980,7 +1013,7 @@ class LeggedRobot(BaseTask):
     def _reward_base_height(self):
         # Penalize base height away from target
         base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
-        return torch.square(base_height - self.cfg.rewards.base_height_target)
+        return self.ck * torch.square(base_height - self.cfg.rewards.base_height_target)
     
     def _reward_torques(self):
         # Penalize torques
@@ -988,11 +1021,11 @@ class LeggedRobot(BaseTask):
 
     def _reward_dof_vel(self):
         # Penalize dof velocities
-        return torch.sum(torch.square(self.dof_vel), dim=1)
+        return self.ck * torch.sum(torch.square(self.dof_vel), dim=1)
     
     def _reward_dof_acc(self):
         # Penalize dof accelerations
-        return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
+        return self.ck * torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
     
     def _reward_action_rate(self):
         # Penalize changes in actions
@@ -1062,10 +1095,31 @@ class LeggedRobot(BaseTask):
         diff1 = self.actions[:, :] - self.dof_action_history[0, :, :]
         diff2 = self.actions[:, :] - 2.0 * self.dof_action_history[0, :, :] + self.dof_action_history[1, :, :]
         return self.ck * (diff1.square().sum(dim=1) + diff2.square().sum(dim=1))
+    
+    def _reward_swing_height(self):
+        allowed_swing_height = 0.2
+        max_heights = self.measured_heights.view(self.num_envs, 4, 52).max(dim=2).values  
+               #########
+            #  #
+               #
+        ########
+
+        lf_heights = self.lf_foot_position[:, 2].unsqueeze(1)
+        lh_heights = self.lh_foot_position[:, 2].unsqueeze(1)
+        rf_heights = self.rf_foot_position[:, 2].unsqueeze(1)
+        rh_heights = self.rh_foot_position[:, 2].unsqueeze(1)
+
+        foot_heights = max_heights - torch.cat([lf_heights, lh_heights, rf_heights, rh_heights], dim=1)
+
+        penalize = foot_heights <= -allowed_swing_height
+        return self.ck * torch.sum(penalize, dim=1).float()
 
     def update_curriculum(self):
-        self.iter += 1.0
+        CURRICULUM_UPDATES = 10000.0
 
-        if self.iter == 10000.0:
+        if self.iter == CURRICULUM_UPDATES:
             print("Done curriculum")
-        self.ck = min(self.iter / 10000, 1.0)
+
+        if self.iter <= CURRICULUM_UPDATES:
+            self.ck = min(self.iter / 10000.0, 1.0)
+            self.iter += 1.0

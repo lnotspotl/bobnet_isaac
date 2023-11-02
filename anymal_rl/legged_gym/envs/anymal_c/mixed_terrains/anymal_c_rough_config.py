@@ -79,6 +79,9 @@ class AnymalCRoughCfg( LeggedRobotCfg ):
         self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
 
     class domain_rand( LeggedRobotCfg.domain_rand):
+        randomize_friction = True
+        friction_range = [0.5, 1.2]
+
         randomize_base_mass = True
         added_mass_range = [-5., 5.]
   

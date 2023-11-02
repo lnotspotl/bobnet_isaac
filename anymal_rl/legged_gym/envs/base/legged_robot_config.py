@@ -33,7 +33,7 @@ from .base_config import BaseConfig
 class LeggedRobotCfg(BaseConfig):
     class env:
         num_envs = 4096
-        num_observations = 344
+        num_observations = 357
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
         num_actions = 12
         env_spacing = 3.  # not used with heightfields/trimeshes 
@@ -136,15 +136,16 @@ class LeggedRobotCfg(BaseConfig):
             ang_vel_xy = -0.05
             orientation = -0.
             torques = -0.00001
-            dof_vel = -0.000
+            dof_vel = -0.003 * 0.02
             dof_acc = -2.5e-7
-            base_height = -0. 
+            base_height = -0.003 * 0.02
             feet_air_time =  1.0
             collision = -1.
             stumble = -0.1
             action_rate = -0.01
             stand_still = 0.01
-            smoothness = 0.001
+            smoothness = -0.005
+            swing_height = -0.003
 
         only_positive_rewards = False # if true negative total rewards are clipped at zero (avoids early termination problems)
         tracking_sigma = 0.25 # tracking reward = exp(-error^2/sigma)
@@ -161,6 +162,7 @@ class LeggedRobotCfg(BaseConfig):
             dof_pos = 1.0
             dof_vel = 0.05
             height_measurements = 5.0
+            contact_forces = 1/600
         clip_observations = 100.
         clip_actions = 100.
 
@@ -218,7 +220,7 @@ class LeggedRobotCfgPPO(BaseConfig):
         value_loss_coef = 1.0
         use_clipped_value_loss = True
         clip_param = 0.2
-        entropy_coef = 0.01
+        entropy_coef = 0.005
         num_learning_epochs = 5
         num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
         learning_rate = 5.e-4 #5.e-4
