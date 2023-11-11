@@ -62,7 +62,8 @@ class PriviligedEncoder(nn.Module):
         airtime = 4
         friction = 1
         contact_forces = 4 * 3
-        size_in = foot_contacts + thigh_contacts + shank_contacts + airtime + friction + contact_forces
+        surface_normals = 4 * 3
+        size_in = foot_contacts + thigh_contacts + shank_contacts + airtime + friction + contact_forces + surface_normals
         self.net = nn.Sequential(
             nn.Linear(size_in, 64),
             activation,
@@ -146,8 +147,7 @@ class ActorCritic(nn.Module):
          enumerate(mod for mod in sequential if isinstance(mod, nn.Linear))]
 
     def preprocess_input(self, observation):
-        # measured velocity, orientation, command, joint_pos_res, joint_velocity, last_action
-        # PROPRIOCEPTIVE_SIZE = 6 + 3 + 3 + 12 + 12 + 12
+        # measured velocity, orientation, command, joint_pos_res, joint_velocity, last_actions, cpg 
         PROPRIOCEPTIVE_SIZE = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
         PROPRIOCEPTIVE_START = 0
 
@@ -157,8 +157,8 @@ class ActorCritic(nn.Module):
         HEIGHTS_SCAN_SIZE = 4 * 52
         HEIGHTS_START = PROPRIOCEPTIVE_SIZE
 
-        # foot contacts, thigh contacs, shank contacts, airtime, friction coefficients
-        PRIVILIGED_SIZE = 4 + 4 + 4 + 4 + 1 + 4*3
+        # foot contacts, thigh contacs, shank contacts, airtime, friction coefficients, contact forces, surface normals
+        PRIVILIGED_SIZE = 4 + 4 + 4 + 4 + 1 + 4*3 + 4*3
         PRIVILIGED_START = PROPRIOCEPTIVE_SIZE + HEIGHTS_SCAN_SIZE
 
         n_envs = observation.shape[0]

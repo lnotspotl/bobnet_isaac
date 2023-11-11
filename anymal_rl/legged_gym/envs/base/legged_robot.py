@@ -271,6 +271,7 @@ class LeggedRobot(BaseTask):
                                     *[self.dof_residuals_history[idx] * self.obs_scales.dof_pos for idx in dof_res_indices],  # joint position history
                                     *[self.dof_velocity_history[idx] * self.obs_scales.dof_vel for idx in vel_indices],     # joint velocity history
                                     *[self.dof_action_history[idx] for idx in act_indices],   # joint target history
+                                    self.cpg.get_observation()  # central pattern generator observation
                                     ),dim=-1)
         
         # print("Base lin vel shape:", self.base_lin_vel.shape)
@@ -301,21 +302,24 @@ class LeggedRobot(BaseTask):
             self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
 
 
-        # print("Observation shape (no priviliged):", self.obs_buf.shape)
-
-
-        # Contact forces expressed in the body frame
-
-
         # Priviliged information
-        self.obs_buf = torch.cat((self.obs_buf, self.contacts, self.thigh_contacts, self.shank_contacts, self.feet_air_time, self.friction_coeffs.squeeze(2), self.cpg.get_observation()), dim=-1)
 
+        # Foot contacts
+        self.obs_buf = torch.cat((self.obs_buf, self.contacts), dim=-1)
+
+        # Contact forces
         for i in range(4):
             contact_force_world = self.contact_forces[:, self.feet_indices[i], :]
             contact_force_body = quat_rotate_inverse(self.base_quat.repeat(1, self.num_envs), contact_force_world) * self.obs_scales.contact_forces
             self.obs_buf = torch.cat((self.obs_buf, contact_force_body), dim=-1)
-        
-        # print("Observation shape:", self.obs_buf.shape)
+
+        # Contact normals
+        normals = self._get_surface_normals()
+        for i in range(4):
+            self.obs_buf = torch.cat((self.obs_buf, normals[i]), dim=-1)
+
+        # Friction coefficients, thigh contacts, shank contacts, airtime
+        self.obs_buf = torch.cat((self.obs_buf, self.friction_coeffs.squeeze(2), self.thigh_contacts, self.shank_contacts, self.feet_air_time), dim=-1)
 
         # add noise if needed
         if self.add_noise:
