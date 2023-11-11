@@ -48,6 +48,8 @@ from anymal_rl.legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_ra
 from anymal_rl.legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
 
+from anymal_rl.legged_gym.envs.base.cpg import CentralPatternGenerator, AnymalInverseKinematics
+
 class LeggedRobot(BaseTask):
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
         """ Parses the provided config file,
@@ -76,6 +78,12 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
+        period = 0.8
+        initial_offsets = torch.Tensor([0.0, period/2, period/2, 0.0]) # LF, LH, RF, RH
+
+        self.cpg = CentralPatternGenerator(period, initial_offsets, n_envs=self.num_envs, device=self.device)
+        self.aik = AnymalInverseKinematics(device=self.device)
+
         self.iter = 0.0
         self.ck = 0.0
 
@@ -86,6 +94,11 @@ class LeggedRobot(BaseTask):
             actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
         """
         clip_actions = self.cfg.normalization.clip_actions
+
+        if actions.shape[1] != 16:
+            actions = torch.zeros((self.num_envs, 16), device=self.device)
+
+
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
         # step physics and render each frame
         self.render()
@@ -158,6 +171,8 @@ class LeggedRobot(BaseTask):
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
 
+        self.cpg.step(self.dt)
+
     def check_termination(self):
         """ Check if environments need to be reset
         """
@@ -187,6 +202,7 @@ class LeggedRobot(BaseTask):
         # reset robot states
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
+        self._reset_cpg(env_ids)
 
         self._resample_commands(env_ids)
 
@@ -292,7 +308,7 @@ class LeggedRobot(BaseTask):
 
 
         # Priviliged information
-        self.obs_buf = torch.cat((self.obs_buf, self.contacts, self.thigh_contacts, self.shank_contacts, self.feet_air_time, self.friction_coeffs.squeeze(2)), dim=-1)
+        self.obs_buf = torch.cat((self.obs_buf, self.contacts, self.thigh_contacts, self.shank_contacts, self.feet_air_time, self.friction_coeffs.squeeze(2), self.cpg.get_observation()), dim=-1)
 
         for i in range(4):
             contact_force_world = self.contact_forces[:, self.feet_indices[i], :]
@@ -456,6 +472,19 @@ class LeggedRobot(BaseTask):
             torques = self.p_gains*(actions_scaled - self.dof_vel) - self.d_gains*(self.dof_vel - self.last_dof_vel)/self.sim_params.dt
         elif control_type=="T":
             torques = actions_scaled
+        elif control_type=="CPG":
+
+            if actions_scaled.shape[1] != 16:
+                phase_offsets = torch.zeros(self.num_envs, 4, device=self.device)
+                dof_residuals = actions_scaled
+            else:
+                phase_offsets = actions_scaled[:, :4]
+                dof_residuals = actions_scaled[:, 4:]
+
+            leg_heights = self.cpg.leg_heights(phase_offsets)
+            joint_angles = self.aik.compute_ik(leg_heights)
+
+            torques = self.p_gains[:12]*(dof_residuals + joint_angles - self.dof_pos) - self.d_gains[:12]*self.dof_vel
         else:
             raise NameError(f"Unknown controller type: {control_type}")
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
@@ -475,6 +504,10 @@ class LeggedRobot(BaseTask):
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                               gymtorch.unwrap_tensor(self.dof_state),
                                               gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+
+    def _reset_cpg(self, env_ids):
+        self.cpg.reset(env_ids)    
+    
     def _reset_root_states(self, env_ids):
         """ Resets ROOT states position and velocities of selected environmments
             Sets base position based on the curriculum
@@ -619,7 +652,8 @@ class LeggedRobot(BaseTask):
 
         # Action history
         DOF_ACTION_HISTORY_LENGTH = 2
-        DOF_ACTION_BUFFER_SIZE = (DOF_ACTION_HISTORY_LENGTH, self.num_envs, self.num_actions)
+        CRITIC_OUT = 16
+        DOF_ACTION_BUFFER_SIZE = (DOF_ACTION_HISTORY_LENGTH, self.num_envs, CRITIC_OUT)
         self.dof_action_history = torch.zeros(
             DOF_ACTION_BUFFER_SIZE, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -639,7 +673,7 @@ class LeggedRobot(BaseTask):
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
-        self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.torques = torch.zeros(self.num_envs, self.num_actions-4, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
@@ -996,6 +1030,29 @@ class LeggedRobot(BaseTask):
         # heights = torch.min(heights, heights3)
 
         return heights1.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
+    
+    def _get_surface_normals(self):
+
+        surface_normals = list()
+
+        for foot in [self.lf_foot_position, self.lh_foot_position, self.rf_foot_position, self.rh_foot_position]:
+            foot_position = foot.squeeze(1) # (num_envs, 3)
+            foot_position[:, [0,1]] += self.terrain.cfg.border_size
+            foot_point = (foot_position/self.terrain.cfg.horizontal_scale).long()
+            px = foot_point[:, 0]
+            px = torch.clip(px, 1, self.height_samples.shape[0]-2)
+
+            py = foot_point[:, 1]
+            py = torch.clip(py, 1, self.height_samples.shape[1]-2)
+
+            sn = torch.ones(self.num_envs, 3, device=self.device)
+            sn[:, 0] = self.terrain.cfg.vertical_scale * (self.height_samples[px+1,py] - self.height_samples[px-1, py]) / (2 * self.terrain.cfg.horizontal_scale)
+            sn[:, 1] = self.terrain.cfg.vertical_scale * (self.height_samples[px, py+1] - self.height_samples[px, py-1]) / (2 * self.terrain.cfg.horizontal_scale)
+            sn = sn / torch.norm(sn, dim=1, keepdim=True)
+
+            surface_normals.append(sn)
+
+        return surface_normals  
 
     #------------ reward functions----------------
     def _reward_lin_vel_z(self):

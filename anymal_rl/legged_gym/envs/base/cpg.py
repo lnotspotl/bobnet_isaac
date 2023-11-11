@@ -5,36 +5,38 @@ import torch
 N_ENVS = 4096
 
 class CentralPatternGenerator:
-    def __init__(self, period, initial_offsets,  n_envs = N_ENVS):
+    def __init__(self, period, initial_offsets,  n_envs = N_ENVS, device="cpu"):
         self.period = period
-        self.initial_offsets = initial_offsets
-
+        self.initial_offsets = initial_offsets.to(device)
+        self.device = device
         self.n_envs = n_envs
-        self.time = torch.zeros((self.n_envs,))
-
-        self.phases = None
+        self.time = torch.zeros((self.n_envs,)).to(device)
 
     def step(self, dt):
         self.time += dt
-        self.phases = None
 
-    def compute_phases(self):
-        if self.phases is not None:
-            return self.phases
+    def get_observation(self):
+        phases = self.compute_phases()
+        return torch.cat([phases.cos(), phases.sin()], dim=-1)
+
+    def compute_phases(self, phase_offsets = None):
         leg_times = self.time.unsqueeze(1) + self.initial_offsets.view(-1, 4)
         # leg_phases = 2 * torch.pi * torch.remainder(leg_times,self.period) / self.period    # <-- alternative
-        self.phases = 2 * torch.pi * torch.frac(leg_times / self.period)
+        self.phases = 2 * torch.pi * torch.frac(leg_times / self.period) 
+
+        if phase_offsets is not None:
+            self.phases = (self.phases + phase_offsets) % (2 * torch.pi)
+
         return self.phases
 
     def reset(self, env_idxs = None):
         if env_idxs is None:
             env_idxs = slice(0, self.n_envs)
         self.time[env_idxs] = 0.0
-        self.phases = None
 
-    def leg_heights(self):
-        phases = self.compute_phases()
-        heights = torch.zeros_like(phases)
+    def leg_heights(self, phase_offsets = None):
+        phases = self.compute_phases(phase_offsets)
+        heights = torch.zeros_like(phases, device=self.device)
 
         # swing - going up
         swing_up_indeces = (phases <= torch.pi / 2)

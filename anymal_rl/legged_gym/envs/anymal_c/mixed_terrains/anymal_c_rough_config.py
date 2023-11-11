@@ -33,7 +33,7 @@ from anymal_rl.legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, L
 class AnymalCRoughCfg( LeggedRobotCfg ):
     class env( LeggedRobotCfg.env ):
         num_envs = 4096
-        num_actions = 12
+        num_actions = 16
 
     class terrain( LeggedRobotCfg.terrain ):
         mesh_type = 'trimesh'

@@ -98,8 +98,9 @@ class ActorCritic(nn.Module):
         self.priviliged_encoder = PriviligedEncoder(activation)
 
         # mlp_input_dim_a = 6 + 3 + 3 + 12 + 12 + 12 + 24 + 4*24
-        mlp_input_dim_a = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 12 + 24 + 4*24
+        mlp_input_dim_a = 3 + 3 + 3 + 3 + 12 + 12 + 8 + 3*12 + 2 * 12 + 2 * 16 + 24 + 4*24
         mlp_input_dim_c = mlp_input_dim_a
+        num_actions=16
 
         # Policy
         actor_layers = []
@@ -147,7 +148,7 @@ class ActorCritic(nn.Module):
     def preprocess_input(self, observation):
         # measured velocity, orientation, command, joint_pos_res, joint_velocity, last_action
         # PROPRIOCEPTIVE_SIZE = 6 + 3 + 3 + 12 + 12 + 12
-        PROPRIOCEPTIVE_SIZE = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 12
+        PROPRIOCEPTIVE_SIZE = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
         PROPRIOCEPTIVE_START = 0
 
         # print("[Preprocess input] | observation shape:", observation.shape)
