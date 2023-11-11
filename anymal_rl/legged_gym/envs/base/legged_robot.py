@@ -78,7 +78,7 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
-        period = 0.8
+        period = 0.60
         initial_offsets = torch.Tensor([0.0, period/2, period/2, 0.0]) # LF, LH, RF, RH
 
         self.cpg = CentralPatternGenerator(period, initial_offsets, n_envs=self.num_envs, device=self.device)
@@ -553,7 +553,7 @@ class LeggedRobot(BaseTask):
             return
         distance = torch.norm(self.root_states[env_ids, :2] - self.env_origins[env_ids, :2], dim=1)
         # robots that walked far enough progress to harder terains
-        move_up = distance > self.terrain.env_length / 2
+        move_up = distance > self.terrain.env_length / 3
         # robots that walked less than half of their required distance go to simpler terrains
         move_down = (distance < torch.norm(self.commands[env_ids, :2], dim=1)*self.max_episode_length_s*0.5) * ~move_up
         self.terrain_levels[env_ids] += 1 * move_up - 1 * move_down
@@ -570,7 +570,7 @@ class LeggedRobot(BaseTask):
             env_ids (List[int]): ids of environments being reset
         """
         # If the tracking reward is above 80% of the maximum, increase the range of commands
-        if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_lin_vel"]:
+        if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.5 * self.reward_scales["tracking_lin_vel"]:
             self.command_ranges["lin_vel_x"][0] = np.clip(self.command_ranges["lin_vel_x"][0] - 0.5, -self.cfg.commands.max_curriculum, 0.)
             self.command_ranges["lin_vel_x"][1] = np.clip(self.command_ranges["lin_vel_x"][1] + 0.5, 0., self.cfg.commands.max_curriculum)
 
@@ -1059,13 +1059,60 @@ class LeggedRobot(BaseTask):
         return surface_normals  
 
     #------------ reward functions----------------
+
+    def _reward_tracking_linear_velocity_new(self):
+        current_velocity = self.base_lin_vel[:, :2]  # (num_envs, 2)
+        desired_velocity = self.commands[:, :2]  # (num_envs, 2)
+
+        desired_velocity_norm = torch.norm(desired_velocity, dim=1) # (num_envs, )
+        current_velocity_norm = torch.norm(current_velocity, dim=1) # (num_envs, )
+
+        curdes_dot = (current_velocity * desired_velocity).sum(dim=1) # (num_envs, )
+
+        reward = torch.where(
+            desired_velocity_norm < 1e-3,
+            (-current_velocity_norm**2).exp(),
+            torch.where(curdes_dot > desired_velocity_norm,
+                        1.0,
+                        (-(curdes_dot - desired_velocity_norm)**2).exp())
+        )
+
+        return reward
+    
+    def _reward_tracking_angular_velocity_new(self):
+        current_velocity = self.base_ang_vel[:, 2]  # (num_envs, )
+        desired_velocity = self.commands[:, 2]
+
+        desired_velocity_norm = torch.abs(desired_velocity)
+        current_velocity_norm = torch.abs(current_velocity)
+
+        reward = torch.where(
+            desired_velocity_norm < 1e-3,
+            (-current_velocity_norm**2).exp(),
+            torch.where(current_velocity_norm > desired_velocity_norm,
+                        1.0,
+                        (-(desired_velocity_norm - current_velocity_norm)**2).exp())
+        )
+
+        return reward
+    
+    def _reward_linear_orthogonal_velocity_new(self):
+        current_velocity = self.base_lin_vel[:, :2]  # (num_envs, 2)
+        desired_velocity = self.commands[:, :2]  # (num_envs, 2)
+        desired_velocity_norm = torch.norm(desired_velocity, dim=1, keepdim=True) # (num_envs, )
+        elig = desired_velocity_norm.squeeze() > 1e-3
+        v_0 = torch.zeros_like(current_velocity)
+        v_0[elig] = current_velocity[elig] - (current_velocity[elig] * desired_velocity[elig]).sum(dim=1, keepdim=True) * desired_velocity[elig] / desired_velocity_norm[elig]**2
+        reward = torch.exp(-3.0 * torch.norm(v_0, dim=1)**2)
+        return reward
+
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
         return torch.square(self.base_lin_vel[:, 2])
     
     def _reward_ang_vel_xy(self):
         # Penalize xy axes base angular velocity
-        return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
+        return torch.square(self.base_ang_vel[:, :2]).sum(dim=1)
     
     def _reward_orientation(self):
         # Penalize non flat base orientation
