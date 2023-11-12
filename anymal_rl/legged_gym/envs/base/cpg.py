@@ -93,8 +93,8 @@ class AnymalInverseKinematics:
         theta1s = torch.atan2(Es_sqrt, d2_ts) + torch.atan2(positions[:, z_indices], positions[:, y_indices])
 
         Ds = (Es + torch.pow(positions[:, x_indices], 2) - a3_t.pow(2) - a4_t.pow(2)) / (2 * a3_t * a4_t)
-        Ds = torch.where(Ds > 1.0, 1.0, Ds)
-        Ds = torch.where(Ds < -1.0, -1.0, Ds)
+        Ds[Ds > 1.0] = 1.0
+        Ds[Ds < -1.0] = -1.0
         theta4_offset = torch.tensor([0.254601], device=self.device)
         theta4s = -torch.atan2(torch.sqrt(1 - Ds.pow(2)), Ds)
         theta4s_final = theta4s + theta4_offset

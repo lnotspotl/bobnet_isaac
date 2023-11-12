@@ -56,17 +56,20 @@ class Anymal(LeggedRobot):
     def reset_idx(self, env_ids):
         super().reset_idx(env_ids)
         # Additionaly empty actuator network hidden states
-        self.sea_hidden_state_per_env[:, env_ids] = 0.
-        self.sea_cell_state_per_env[:, env_ids] = 0.
+
+        if self.cfg.control.use_actuator_network:
+            self.sea_hidden_state_per_env[:, env_ids] = 0.
+            self.sea_cell_state_per_env[:, env_ids] = 0.
 
     def _init_buffers(self):
         super()._init_buffers()
         # Additionally initialize actuator network hidden state tensors
-        self.sea_input = torch.zeros(self.num_envs*self.num_actions, 1, 2, device=self.device, requires_grad=False)
-        self.sea_hidden_state = torch.zeros(2, self.num_envs*self.num_actions, 8, device=self.device, requires_grad=False)
-        self.sea_cell_state = torch.zeros(2, self.num_envs*self.num_actions, 8, device=self.device, requires_grad=False)
-        self.sea_hidden_state_per_env = self.sea_hidden_state.view(2, self.num_envs, self.num_actions, 8)
-        self.sea_cell_state_per_env = self.sea_cell_state.view(2, self.num_envs, self.num_actions, 8)
+        if self.cfg.control.use_actuator_network:
+            self.sea_input = torch.zeros(self.num_envs*self.num_actions, 1, 2, device=self.device, requires_grad=False)
+            self.sea_hidden_state = torch.zeros(2, self.num_envs*self.num_actions, 8, device=self.device, requires_grad=False)
+            self.sea_cell_state = torch.zeros(2, self.num_envs*self.num_actions, 8, device=self.device, requires_grad=False)
+            self.sea_hidden_state_per_env = self.sea_hidden_state.view(2, self.num_envs, self.num_actions, 8)
+            self.sea_cell_state_per_env = self.sea_cell_state.view(2, self.num_envs, self.num_actions, 8)
 
     def _compute_torques(self, actions):
         # Choose between pd controller and actuator network
