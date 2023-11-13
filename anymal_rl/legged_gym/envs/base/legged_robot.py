@@ -245,7 +245,17 @@ class LeggedRobot(BaseTask):
             rew = self._reward_termination() * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
+
+    def get_heights_observation(self, measured_heights):
+        heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - measured_heights, -1, 1.) * self.obs_scales.height_measurements
+        return heights
     
+    def get_heights_observation_with_noise(self, noise_generator):
+        assert noise_generator.n_envs == self.num_envs
+        measured_heights = self._get_heights(noise_generator=noise_generator)
+        heights = self.get_heights_observation(measured_heights)
+        return heights
+
     def compute_observations(self):
         """ Computes observations
         """
@@ -297,8 +307,7 @@ class LeggedRobot(BaseTask):
             # heights = torch.clip(heights, -1, 1) * self.obs_scales.height_measurements
 
             # heights.shape == [num_envs, 208]
-            heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
-
+            heights = self.get_heights_observation(self.measured_heights)
             self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
 
 
@@ -996,7 +1005,7 @@ class LeggedRobot(BaseTask):
             (lf_points, lh_points, rf_points, rh_points), dim = 1
         )
     
-    def _get_heights(self, env_ids=None):
+    def _get_heights(self, env_ids=None, noise_generator=None):
         """ Samples heights of the terrain at required points around each robot.
             The points are offset by the base's position and rotated by the base's yaw
 
@@ -1014,13 +1023,20 @@ class LeggedRobot(BaseTask):
         elif self.cfg.terrain.mesh_type == 'none':
             raise NameError("Can't measure height with terrain mesh type 'none'")
 
-        points = self.get_height_points2()
+        points = self.get_height_points2()  # (num_envs, 208, 3)
         # if env_ids:
         #     points = quat_apply_yaw(self.base_quat[env_ids].repeat(1, self.num_height_points), self.height_points[env_ids]) + (self.root_states[env_ids, :3]).unsqueeze(1)
         # else:
         #     points = quat_apply_yaw(self.base_quat.repeat(1, self.num_height_points), self.height_points) + (self.root_states[:, :3]).unsqueeze(1)
 
         points += self.terrain.cfg.border_size
+
+        # add noise
+        if noise_generator is not None:
+            x_noise, y_noise, z_noise = noise_generator.sample_noise()
+            points[:, :, 0] += x_noise
+            points[:, :, 1] += y_noise
+
         points = (points/self.terrain.cfg.horizontal_scale).long()
         px = points[:, :, 0].view(-1)
         py = points[:, :, 1].view(-1)
@@ -1028,6 +1044,10 @@ class LeggedRobot(BaseTask):
         py = torch.clip(py, 0, self.height_samples.shape[1]-2)
 
         heights1 = self.height_samples[px, py]
+
+        if noise_generator is not None:
+            heights1 += z_noise.view(-1)
+
         # heights2 = self.height_samples[px+1, py]
         # heights3 = self.height_samples[px, py+1]
         # heights = torch.min(heights1, heights2)
