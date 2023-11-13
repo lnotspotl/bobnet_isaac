@@ -35,6 +35,7 @@ class ExteroceptiveNoiseGenerator:
         update_idxs = (self.env_steps == self.env_max_steps // 2).nonzero().squeeze()
         if update_idxs.numel() != 0:
             self.update_zs(update_idxs)
+        self.update_curriculum()
 
     def update_zs(self, idxs=None):
         if idxs is None:
