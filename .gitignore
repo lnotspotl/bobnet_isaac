@@ -22,3 +22,4 @@ var/
 
 logs/
 resources/
+*.pt
