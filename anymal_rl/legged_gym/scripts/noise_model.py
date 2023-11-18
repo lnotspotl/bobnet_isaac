@@ -3,30 +3,32 @@
 import torch
 
 class ExteroceptiveNoiseGenerator:
-    def __init__(self, points_per_leg, n_envs, env_max_steps, n_legs=4):
+    def __init__(self, points_per_leg, n_envs, env_max_steps, n_legs=4, device="cuda"):
         self.n_legs = n_legs
         self.n_envs = n_envs
         self.points_per_leg = points_per_leg
         self.env_max_steps = env_max_steps
+        self.device = device
 
         self.ck = 0.0
-        self.ck_step = 1e-5
+        self.ck_step = 1/25000
 
         self.env_steps = torch.zeros(self.n_envs, dtype=torch.long)
-        self.zs = torch.zeros(self.n_envs, 8)
+        self.zs = torch.zeros(self.n_envs, 8, device=self.device)
 
         self.update_zs()
 
-        self.w_x_stored = torch.zeros(self.n_envs, self.n_legs, dtype=torch.float)
-        self.w_y_stored = torch.zeros(self.n_envs, self.n_legs, dtype=torch.float)
-        self.w_z_stored = torch.zeros(self.n_envs, self.n_legs, dtype=torch.float)
+        self.w_x_stored = torch.zeros(self.n_envs, self.n_legs, dtype=torch.float, device=self.device)
+        self.w_y_stored = torch.zeros(self.n_envs, self.n_legs, dtype=torch.float, device=self.device)
+        self.w_z_stored = torch.zeros(self.n_envs, self.n_legs, dtype=torch.float, device=self.device)
+
 
     def update_curriculum(self):
         self.ck = min(self.ck + self.ck_step, 1.0)
 
     def reset(self, idxs):
-        self.env_steps[idxs] = 0
         if idxs.numel() != 0:
+            self.env_steps[idxs] = 0
             self.update_zs(idxs)
             self.sample_ws(idxs)
 
@@ -42,7 +44,7 @@ class ExteroceptiveNoiseGenerator:
             idxs = torch.arange(self.n_envs)
         N = idxs.numel()
         p = torch.rand(N)
-        new_zs = torch.zeros(N, self.zs.shape[1])
+        new_zs = torch.zeros(N, self.zs.shape[1], device=self.device)
         new_zs[p < 0.6] = self.zs_nominal
         new_zs[torch.logical_and(p >= 0.6, p < 0.9)] = self.zs_offset
         new_zs[p >= 0.9] = self.zs_noisy
@@ -74,9 +76,12 @@ class ExteroceptiveNoiseGenerator:
         eps_fz = self.eps_fz(idxs)
         w_z = self.w_z_stored[idxs]
 
-        x_noise = (eps_px + eps_fx.unsqueeze(-1) + w_x.unsqueeze(-1)).view(N, -1)
-        y_noise = (eps_py + eps_fy.unsqueeze(-1) + w_y.unsqueeze(-1)).view(N, -1)
-        z_noise = (eps_pz + eps_fz.unsqueeze(-1) + w_z.unsqueeze(-1)).view(N, -1)
+        # outlier noise
+        eps_outlier = self.eps_outlier(idxs).view(N, self.n_legs, self.points_per_leg)
+
+        x_noise = (eps_px + eps_fx.unsqueeze(-1) + w_x.unsqueeze(-1)).view(N, -1).to(self.device)
+        y_noise = (eps_py + eps_fy.unsqueeze(-1) + w_y.unsqueeze(-1)).view(N, -1).to(self.device)
+        z_noise = (eps_pz + eps_fz.unsqueeze(-1) + w_z.unsqueeze(-1) + eps_outlier).view(N, -1).to(self.device)
 
         return x_noise, y_noise, z_noise
 
@@ -84,42 +89,42 @@ class ExteroceptiveNoiseGenerator:
 
     @property
     def zs_nominal(self):
-        return torch.tensor([0.004, 0.005, 0.01, 0.04, 0.03, 0.05, 0.1, 0.1])
+        return torch.tensor([0.004, 0.005, 0.01, 0.04, 0.03, 0.05, 0.1, 0.1]).to(self.device) * 1.0
 
     @property
     def zs_offset(self):
-        return torch.tensor([0.004, 0.005, 0.01, 0.1 * self.ck, 0.1 * self.ck, 0.02, 0.1, 0.1])
+        return torch.tensor([0.004, 0.005, 0.01, 0.1 * self.ck, 0.1 * self.ck, 0.02, 0.1, 0.1]).to(self.device) * 1.0
 
     @property
     def zs_noisy(self):
-        return torch.tensor([0.004, 0.1 * self.ck, 0.1 * self.ck, 0.3 * self.ck, 0.3 * self.ck, 0.3 * self.ck, 0.1, 0.1])
+        return torch.tensor([0.004, 0.1 * self.ck, 0.1 * self.ck, 0.3 * self.ck, 0.3 * self.ck, 0.3 * self.ck, 0.1, 0.1]).to(self.device) * 1.0
 
     def eps_pxy(self, idxs):
         """ Per-step xy noise for each point """
-        return torch.randn(size=(idxs.numel(), self.n_legs * self.points_per_leg)) * self.zs[idxs, 0].view(-1, 1)
+        return torch.randn(size=(idxs.numel(), self.n_legs, self.points_per_leg), device=self.device) * self.zs[idxs, 0].view(-1, 1, 1).to(self.device)
 
     def eps_pz(self, idxs):
         """ Per-step z noise for each point """
-        return torch.randn(size=(idxs.numel(), self.n_legs * self.points_per_leg)) * self.zs[idxs, 1].view(-1, 1)
+        return torch.randn(size=(idxs.numel(), self.n_legs, self.points_per_leg), device=self.device) * self.zs[idxs, 1].view(-1, 1, 1).to(self.device)
 
     def eps_fxy(self, idxs):
         """ Per-step xy noise for each foot """
-        return torch.randn(size=(idxs.numel(), self.n_legs)) * self.zs[idxs, 2].view(-1, 1)
+        return torch.randn(size=(idxs.numel(), self.n_legs), device=self.device) * self.zs[idxs, 2].view(-1, 1).to(self.device)
 
     def eps_fz(self, idxs):
         """ Per-step z noise for each foot """
-        return torch.randn(size=(idxs.numel(), self.n_legs)) * self.zs[idxs, 3].view(-1, 1)
+        return torch.randn(size=(idxs.numel(), self.n_legs), device=self.device) * self.zs[idxs, 3].view(-1, 1).to(self.device)
 
     def eps_outlier(self, idxs):
         """ Per-step outlier noise for each point """
-        ret = torch.randn(size=(idxs.numel(), self.n_legs * self.points_per_leg)) * self.zs[idxs, 4].view(-1, 1)
-        is_outlier = torch.rand_like(ret) <= self.zs[idxs, 5].view(-1, 1)
+        ret = torch.randn(size=(idxs.numel(), self.n_legs, self.points_per_leg), device=self.device) * self.zs[idxs, 4].view(-1, 1, 1).to(self.device)
+        is_outlier = torch.rand_like(ret) <= self.zs[idxs, 5].view(-1, 1, 1).to(self.device)
         return ret * is_outlier
 
     def w_xy(self, idxs):
         """ Per-episode xy noise for each foot """
-        return torch.randn(size=(idxs.numel(), self.n_legs)) * self.zs[idxs, 6].view(-1, 1)
+        return torch.randn(size=(idxs.numel(), self.n_legs), device=self.device) * self.zs[idxs, 6].view(-1, 1).to(self.device)
 
     def w_z(self, idxs):
         """ Per-episode xy noise for each foot """
-        return torch.randn(size=(idxs.numel(), self.n_legs)) * self.zs[idxs, 7].view(-1, 1)
+        return torch.randn(size=(idxs.numel(), self.n_legs), device=self.device) * self.zs[idxs, 7].view(-1, 1).to(self.device)

@@ -9,7 +9,7 @@ import copy
 proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
 exteroceptive_latent_size = 4 * 24
 priviliged_latent_size = 24
-hidden_size = 1024
+hidden_size = 2048
 exteroceptive_size=4*52
 priviliged_size=41
 
@@ -24,7 +24,8 @@ class BeliefEncoder(nn.Module):
 
         # RNN
         self.gru = nn.GRUCell(input_size=self.gru_input_size, hidden_size=self.hidden_size)
-        self.hidden = self.init_hidden()
+
+        self.register_buffer(f'hidden', self.init_hidden())
 
         # encoders
         self.ga = nn.Sequential(
@@ -36,7 +37,9 @@ class BeliefEncoder(nn.Module):
         self.gb_out_size = exteroceptive_latent_size + priviliged_latent_size
         self.exteroceptive_latent_size = exteroceptive_latent_size
         self.gb = nn.Sequential(
-            nn.Linear(in_features=self.hidden_size, out_features=512),
+            nn.Linear(in_features=self.hidden_size, out_features=1024),
+            nn.ELU(),
+            nn.Linear(in_features=1024, out_features=512),
             nn.ELU(),
             nn.Linear(in_features=512, out_features=256),
             nn.ELU(),
@@ -46,11 +49,9 @@ class BeliefEncoder(nn.Module):
         self.reset_every = 50
         self.i = 0
 
-    def forward(self, proprioceptive, exteroceptive, hidden=None):
-
+    def forward(self, proprioceptive, exteroceptive):
         # Forward pass through the RNN
-        if hidden is None:
-            hidden = self.hidden
+        hidden = self.hidden
         rnn_input = self.concat(proprioceptive, exteroceptive)
         hidden_new = self.gru(rnn_input, hidden)
 
@@ -135,11 +136,11 @@ class StudentPolicy(nn.Module):
             return
         self.belief_encoder.hidden[dones] = self.belief_encoder.init_hidden()[dones]
 
-    def forward(self, proprioceptive, exteroceptive, hidden=None):
+    def forward(self, proprioceptive, exteroceptive):
         n_envs = proprioceptive.shape[0]
         exteroceptive_encoded = self.ge(exteroceptive).view(n_envs, -1)
 
-        belief_state, hidden = self.belief_encoder(proprioceptive, exteroceptive_encoded, hidden=hidden)
+        belief_state, hidden = self.belief_encoder(proprioceptive, exteroceptive_encoded)
 
         mlp_in = torch.cat((proprioceptive, belief_state), dim=-1)
         action = self.mlp(mlp_in)
@@ -160,6 +161,43 @@ class StudentPolicy(nn.Module):
     @torch.no_grad()    
     def inference(self, proprioceptive, exteroceptive):
         return self(proprioceptive, exteroceptive)
+    
+class StudentPolicyJitted(nn.Module):
+    def __init__(self, teacher_policy):
+        super().__init__()
+        self.student_policy = StudentPolicy(200, teacher_policy)
+
+        proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
+        exteroceptive_latent_size = 4 * 24
+        priviliged_latent_size = 24
+        hidden_size = 2048
+        exteroceptive_size=4*52
+        priviliged_size=41
+
+        # self.register_buffer(f'hidden', torch.zeros(1, hidden_size))
+
+    def forward(self, observation):
+        proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
+        exteroceptive_latent_size = 4 * 24
+        priviliged_latent_size = 24
+        hidden_size = 2048
+        exteroceptive_size=4*52
+        priviliged_size=41
+        proprioceptive = observation[:, :proprioceptive_size]
+        exteroceptive = observation[:, proprioceptive_size:]
+        action, reconstructed = self.student_policy(proprioceptive, exteroceptive)
+        return action.squeeze()
+    
+    def load_from_file(self, path):
+        self.student_policy.load_weights(path)
+
+    @torch.jit.export
+    def reset_hidden(self):
+        self.student_policy.belief_encoder.hidden[:] = 0.
+
+    @torch.jit.export
+    def set_hidden_size(self):
+        self.student_policy.belief_encoder.hidden = torch.zeros(1, 2048)
 
 ## helper functions
 def proprioceptive_from_observation(obs):

@@ -252,9 +252,9 @@ class LeggedRobot(BaseTask):
     
     def get_heights_observation_with_noise(self, noise_generator):
         assert noise_generator.n_envs == self.num_envs
-        measured_heights = self._get_heights(noise_generator=noise_generator)
+        measured_heights, pts = self._get_heights(noise_generator=noise_generator)
         heights = self.get_heights_observation(measured_heights)
-        return heights
+        return heights, pts
 
     def compute_observations(self):
         """ Computes observations
@@ -445,7 +445,7 @@ class LeggedRobot(BaseTask):
             self.commands[:, 2] = torch.clip(0.5*wrap_to_pi(self.commands[:, 3] - heading), -1., 1.)
 
         if self.cfg.terrain.measure_heights:
-            self.measured_heights = self._get_heights()
+            self.measured_heights, _ = self._get_heights()
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
 
@@ -956,6 +956,24 @@ class LeggedRobot(BaseTask):
                 sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose) 
 
+    def draw_spheres(self, x, y, z, reset=True, id=0, color=(1, 1, 0)):
+        # heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - measured_heights, -1, 1.) * self.obs_scales.height_measurements
+        if reset:
+            self.gym.clear_lines(self.viewer)
+            self.gym.refresh_rigid_body_state_tensor(self.sim)
+        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 4, 4, None, color=color)
+
+        x = x - self.terrain.cfg.border_size
+        y = y - self.terrain.cfg.border_size
+        z = -((z / self.obs_scales.height_measurements) + 0.5 - self.root_states[id, 2])
+
+        x = x.cpu().numpy()
+        y = y.cpu().numpy()
+        z = z.cpu().numpy()
+        for i in range(x.shape[0]):
+            sphere_pose = gymapi.Transform(gymapi.Vec3(x[i], y[i], z[i]), r=None)
+            gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[id], sphere_pose) 
+
     def _init_height_points(self):
         """ Returns points at which the height measurments are sampled (in base frame)
 
@@ -1034,6 +1052,11 @@ class LeggedRobot(BaseTask):
         # add noise
         if noise_generator is not None:
             x_noise, y_noise, z_noise = noise_generator.sample_noise()
+            # print("x_noise", x_noise.shape)
+            # print(torch.max(torch.abs(x_noise)))
+            # print(torch.max(torch.abs(x_noise)))
+            # print("z noise", z_noise.shape)
+            # print(torch.max(torch.abs(z_noise)))
             points[:, :, 0] += x_noise
             points[:, :, 1] += y_noise
 
@@ -1043,24 +1066,17 @@ class LeggedRobot(BaseTask):
         px = torch.clip(px, 0, self.height_samples.shape[0]-2)
         py = torch.clip(py, 0, self.height_samples.shape[1]-2)
 
-        heights1 = self.height_samples[px, py]
-
+        heights1 = self.height_samples[px, py] * self.terrain.cfg.vertical_scale
         if noise_generator is not None:
             heights1 += z_noise.view(-1)
-
-        # heights2 = self.height_samples[px+1, py]
-        # heights3 = self.height_samples[px, py+1]
-        # heights = torch.min(heights1, heights2)
-        # heights = torch.min(heights, heights3)
-
-        return heights1.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
+        return heights1.view(self.num_envs, -1), points * self.terrain.cfg.horizontal_scale
     
     def _get_surface_normals(self):
 
         surface_normals = list()
 
         for foot in [self.lf_foot_position, self.lh_foot_position, self.rf_foot_position, self.rh_foot_position]:
-            foot_position = foot.squeeze(1) # (num_envs, 3)
+            foot_position = foot.clone().squeeze(1) # (num_envs, 3)
             foot_position[:, [0,1]] += self.terrain.cfg.border_size
             foot_point = (foot_position/self.terrain.cfg.horizontal_scale).long()
             px = foot_point[:, 0]
