@@ -85,7 +85,7 @@ def play(args):
 
         extero_diff = (extero - exteroceptive) / 5.0
 
-        print(torch.abs(extero_diff).mean())
+        # print(torch.abs(extero_diff).mean())
 
         obs, _, rews, dones, infos = env.step(action_student)
         env.draw_spheres(x_points, y_points, z_points, reset=True)

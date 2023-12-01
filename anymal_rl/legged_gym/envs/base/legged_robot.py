@@ -48,7 +48,7 @@ from anymal_rl.legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_ra
 from anymal_rl.legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
 
-from anymal_rl.legged_gym.envs.base.cpg import CentralPatternGenerator, AnymalInverseKinematics
+from anymal_rl.legged_gym.envs.base.cpg import CentralPatternGenerator, AnymalInverseKinematics, SpotInverseKinematics
 
 class LeggedRobot(BaseTask):
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
@@ -82,7 +82,13 @@ class LeggedRobot(BaseTask):
         initial_offsets = torch.Tensor([0.0, period/2, period/2, 0.0]) # LF, LH, RF, RH
 
         self.cpg = CentralPatternGenerator(period, initial_offsets, n_envs=self.num_envs, device=self.device)
-        self.aik = AnymalInverseKinematics(device=self.device)
+
+        if self.cfg.asset.name == "spot":
+            self.aik = SpotInverseKinematics(device=self.device)
+        elif self.cfg.asset.name == "anymal_c":
+            self.aik = AnymalInverseKinematics(device=self.device)
+        else:
+            raise ValueError(f"Unknown robot name: {self.cfg.asset.name}")
 
         self.iter = 0.0
         self.ck = 0.0
@@ -116,6 +122,7 @@ class LeggedRobot(BaseTask):
         self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
         if self.privileged_obs_buf is not None:
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
+
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def post_physics_step(self):
@@ -627,10 +634,19 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)  # kuba
 
         # kuba
-        self.lf_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["LF_FOOT"], 0:3]
-        self.lh_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["LH_FOOT"], 0:3]
-        self.rf_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["RF_FOOT"], 0:3]
-        self.rh_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["RH_FOOT"], 0:3]
+
+        if "spot" in self.cfg.asset.name:
+            self.lf_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["fl_lleg"], 0:3]
+            self.lh_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["hl_lleg"], 0:3]
+            self.rf_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["fr_lleg"], 0:3]
+            self.rh_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["hr_lleg"], 0:3]
+
+        if "anymal" in self.cfg.asset.name:
+            self.lf_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["LF_FOOT"], 0:3]
+            self.lh_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["LH_FOOT"], 0:3]
+            self.rf_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["RF_FOOT"], 0:3]
+            self.rh_foot_position = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)[:, self.name2idx["RH_FOOT"], 0:3]
+
 
         # contacts
         self.contacts = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float32)
@@ -826,11 +842,14 @@ class LeggedRobot(BaseTask):
         self.num_dof = self.gym.get_asset_dof_count(robot_asset)
         self.num_bodies = self.gym.get_asset_rigid_body_count(robot_asset)
         self.name2idx = self.gym.get_asset_rigid_body_dict(robot_asset)
+
+        print(self.name2idx.keys())
         dof_props_asset = self.gym.get_asset_dof_properties(robot_asset)
         rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(robot_asset)
 
         # save body names from the asset
         body_names = self.gym.get_asset_rigid_body_names(robot_asset)
+        print(body_names)
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
