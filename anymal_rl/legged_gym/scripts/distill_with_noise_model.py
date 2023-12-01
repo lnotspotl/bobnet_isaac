@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import tqdm
 
+from student_policy import proprioceptive_size
 from student_policy import StudentPolicy, proprioceptive_from_observation, exteroceptive_from_observation, priviliged_from_observation, priviliged_from_decoded, priviliged_size, exteroceptive_from_decoded
 from noise_model import ExteroceptiveNoiseGenerator
 
@@ -54,11 +55,26 @@ def play(args, policy_path):
 
     noise_generator = ExteroceptiveNoiseGenerator(52, total_envs, env.max_episode_length, n_legs=4)
 
+    noise_vec = torch.zeros(proprioceptive_size)
+    noise_scales = env_cfg.noise.noise_scales
+    noise_level = env_cfg.noise.noise_level
+    obs_scales = env_cfg.normalization.obs_scales
+    noise_vec[:3] = 0.0 # command
+    noise_vec[3:6] = noise_scales.gravity * noise_level  # gravity
+    noise_vec[6:9] = noise_scales.lin_vel * noise_level * obs_scales.lin_vel
+    noise_vec[9:12] = noise_scales.ang_vel * noise_level * obs_scales.ang_vel
+    noise_vec[12:24] = noise_scales.dof_pos * noise_level * obs_scales.dof_pos
+    noise_vec[24:36] = noise_scales.dof_vel * noise_level * obs_scales.dof_vel
+    noise_vec = noise_vec.to(env.device)
+
     for i in tqdm.tqdm(range(10*int(env.max_episode_length))):
         j += 1
 
         # Unpack observation
         proprioceptive = proprioceptive_from_observation(obs)
+
+        proprioceptive_with_noise = proprioceptive + (2 * torch.rand_like(proprioceptive) - 1) * noise_vec
+
         exteroceptive = exteroceptive_from_observation(obs)
         priviliged = priviliged_from_observation(obs)
 
@@ -76,7 +92,7 @@ def play(args, policy_path):
         reconstructed_target = torch.cat((exteroceptive, priviliged), dim=-1)
 
         # Generate student policy output
-        action_student, reconstructed_student = student_policy(proprioceptive, exteroceptive_with_noise)
+        action_student, reconstructed_student = student_policy(proprioceptive_with_noise, exteroceptive_with_noise)
         # env.draw_spheres(x_points, y_points, z_points, reset=True)
         # env.draw_spheres(x_points, y_points, exteroceptive_from_decoded(reconstructed_student.detach())[0,:].view(-1), reset=False, color=(0,0,1))
 
