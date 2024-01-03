@@ -59,6 +59,8 @@ class AnymalInverseKinematics:
         self.a3 = 0.285
         self.a4 = 0.34923
 
+        self.tt = None
+
         self.default_positions = torch.Tensor([
              0.00790786, 0.05720384, -height,  # LF
             -0.00790786, 0.05720384, -height,  # LH

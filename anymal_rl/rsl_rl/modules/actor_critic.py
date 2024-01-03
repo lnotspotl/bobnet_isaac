@@ -46,7 +46,7 @@ class HeightsEncoder(nn.Module):
             nn.Linear(80,60),
             activation,
             nn.Linear(60, 24),
-            nn.Tanh()
+            activation
         )
 
     def forward(self, heights):
@@ -70,7 +70,7 @@ class PriviligedEncoder(nn.Module):
             nn.Linear(64, 32),
             activation,
             nn.Linear(32, 24),
-            nn.Tanh()
+            activation
         )
 
     def forward(self, priviliged_info):

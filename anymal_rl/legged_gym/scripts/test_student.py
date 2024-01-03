@@ -53,12 +53,12 @@ def play(args):
     actor_critic = ppo_runner.alg.actor_critic
 
     n_envs = env_cfg.env.num_envs
-    student_policy = StudentPolicy(200, actor_critic, device=env.device)
+    student_policy = StudentPolicy(500, actor_critic, device=env.device)
 
-    student_policy_path = "distilled_policy_jittable.pt"
+    student_policy_path = "loool.pt"
     student_policy.load_weights(student_policy_path)
     print(f"loaded weights from {student_policy_path}")
-    student_policy.belief_encoder.hidden = torch.zeros(n_envs, 2048).to(env.device)
+    student_policy.belief_encoder.hidden = torch.zeros(2, n_envs, 50).to(env.device)
     student_policy.belief_encoder.n_envs = n_envs
     
     noise_generator = ExteroceptiveNoiseGenerator(52, env_cfg.env.num_envs, env.max_episode_length, n_legs=4)

@@ -9,7 +9,7 @@ import copy
 proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
 exteroceptive_latent_size = 4 * 24
 priviliged_latent_size = 24
-hidden_size = 50
+hidden_size = 512
 exteroceptive_size=4*52
 priviliged_size=41
 
@@ -23,29 +23,25 @@ class BeliefEncoder(nn.Module):
         self.gru_input_size = proprioceptive_size + exteroceptive_latent_size
 
         # RNN
-        self.gru_num_layers = 2
-        self.gru = nn.GRU(input_size=self.gru_input_size, hidden_size=self.hidden_size, batch_first=True, num_layers=self.gru_num_layers)
-        # self.gru = nn.GRUCell(input_size=self.gru_input_size, hidden_size=self.hidden_size)
+        self.gru = nn.GRUCell(input_size=self.gru_input_size, hidden_size=self.hidden_size)
 
         self.register_buffer(f'hidden', self.init_hidden())
 
         # encoders
         self.ga = nn.Sequential(
-            nn.Linear(in_features=self.hidden_size, out_features=64),
+            nn.Linear(in_features=self.hidden_size, out_features=128),
             nn.ELU(),
-            nn.Linear(in_features=64, out_features=64),
-            nn.ELU(),
-            nn.Linear(in_features=64, out_features=96),
+            nn.Linear(in_features=128, out_features=1),
         )
 
         self.gb_out_size = exteroceptive_latent_size + priviliged_latent_size
         self.exteroceptive_latent_size = exteroceptive_latent_size
         self.gb = nn.Sequential(
-            nn.Linear(in_features=self.hidden_size, out_features=64),
+            nn.Linear(in_features=self.hidden_size, out_features=256),
             nn.ELU(),
-            nn.Linear(in_features=64, out_features=64),
+            nn.Linear(in_features=256, out_features=256),
             nn.ELU(),
-            nn.Linear(in_features=64, out_features=self.gb_out_size),
+            nn.Linear(in_features=256, out_features=self.gb_out_size),
         )
 
         self.reset_every = 100
@@ -55,20 +51,18 @@ class BeliefEncoder(nn.Module):
         # Forward pass through the RNN
         hidden = self.hidden
         rnn_input = self.concat(proprioceptive, exteroceptive)
-
-        rnn_input = rnn_input.unsqueeze(1)
-        output, hidden_new = self.gru(rnn_input, hidden)
-        output = output.squeeze(1)
+        hidden_new = self.gru(rnn_input, hidden)
 
         # Gate
-        alpha = torch.sigmoid(self.ga(output))
+        alpha = torch.sigmoid(self.ga(hidden_new))
         exteroceptive_attenuated = alpha * exteroceptive
 
-        belief_state = self.gb(output)
+        belief_state = self.gb(hidden_new)
+
         belief_state[:, :self.exteroceptive_latent_size] += exteroceptive_attenuated
 
         self.hidden = hidden_new
-        return belief_state, self.hidden, output
+        return belief_state, self.hidden
     
     def reset_graph(self):
         self.i += 1
@@ -81,7 +75,7 @@ class BeliefEncoder(nn.Module):
         return torch.cat((proprio, extero_latent), dim=-1)
 
     def init_hidden(self):
-        return torch.zeros(self.gru_num_layers, self.n_envs, self.hidden_size, device=self.device)
+        return torch.zeros(self.n_envs, self.hidden_size, device=self.device)
 
 class BeliefDecoder(nn.Module):
     def __init__(self, hidden_size):
@@ -91,29 +85,23 @@ class BeliefDecoder(nn.Module):
 
         # Gate
         self.ga = nn.Sequential(
-            nn.Linear(in_features=self.hidden_size, out_features=64),
+            nn.Linear(in_features=self.hidden_size, out_features=128),
             nn.ELU(),
-            nn.Linear(in_features=64, out_features=128),
-            nn.ELU(),
-            nn.Linear(in_features=128, out_features=4*52),
+            nn.Linear(in_features=128, out_features=1),
         )
 
         # Exteroceptive decoder
         self.exteroceptive_decoder = nn.Sequential(
-            nn.Linear(in_features=self.hidden_size, out_features=64),
+            nn.Linear(in_features=self.hidden_size, out_features=256),
             nn.ELU(),
-            nn.Linear(in_features=64, out_features=128),
-            nn.ELU(),
-            nn.Linear(in_features=128, out_features=4*52),
+            nn.Linear(in_features=256, out_features=exteroceptive_size),
         )
 
         # Priviliged decoder
         self.priviliged_decoder = nn.Sequential(
-            nn.Linear(in_features=self.hidden_size, out_features=64),
+            nn.Linear(in_features=self.hidden_size, out_features=256),
             nn.ELU(),
-            nn.Linear(in_features=64, out_features=64),
-            nn.ELU(),
-            nn.Linear(in_features=64, out_features=priviliged_size),
+            nn.Linear(in_features=256, out_features=priviliged_size),
         )
 
 
@@ -144,18 +132,18 @@ class StudentPolicy(nn.Module):
     def reset(self, dones):
         if not dones.any():
             return
-        self.belief_encoder.hidden[:, dones] = self.belief_encoder.init_hidden()[:, dones]
+        self.belief_encoder.hidden[dones] = self.belief_encoder.init_hidden()[dones]
 
     def forward(self, proprioceptive, exteroceptive):
         n_envs = proprioceptive.shape[0]
         exteroceptive_encoded = self.ge(exteroceptive).view(n_envs, -1)
 
-        belief_state, hidden, output = self.belief_encoder(proprioceptive, exteroceptive_encoded)
+        belief_state, hidden = self.belief_encoder(proprioceptive, exteroceptive_encoded)
 
         mlp_in = torch.cat((proprioceptive, belief_state), dim=-1)
         action = self.mlp(mlp_in)
 
-        reconstructed = self.belief_decoder(output, exteroceptive)
+        reconstructed = self.belief_decoder(hidden, exteroceptive)
 
         return action, torch.cat(reconstructed, dim=-1)
     
@@ -207,7 +195,7 @@ class StudentPolicyJitted(nn.Module):
 
     @torch.jit.export
     def set_hidden_size(self):
-        self.student_policy.belief_encoder.hidden = torch.zeros(2, 1, 50)
+        self.student_policy.belief_encoder.hidden = torch.zeros(1, 512)
 
 ## helper functions
 def proprioceptive_from_observation(obs):

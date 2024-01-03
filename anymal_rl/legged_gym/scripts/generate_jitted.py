@@ -37,7 +37,7 @@ def play(args, policy_path):
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
-    policy = ppo_runner.get_inference_policy(device=env.device)
+    # policy = ppo_runner.get_inference_policy(device=env.device)
 
     actor_critic = ppo_runner.alg.actor_critic
 

@@ -22,14 +22,14 @@ def parse_args():
 def play(args, policy_path):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
-    total_envs = 200
+    total_envs = 500
     env_cfg.env.num_envs = total_envs
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 5
+    # env_cfg.terrain.num_rows = 5
+    # env_cfg.terrain.num_cols = 5
     env_cfg.terrain.curriculum = False
     env_cfg.noise.add_noise = False
     # env_cfg.domain_rand.randomize_friction = False
-    env_cfg.domain_rand.push_robots = False
+    env_cfg.domain_rand.push_robots = True
     env_cfg.domain_rand.randomize_friction = True
 
     # prepare environment
@@ -46,7 +46,7 @@ def play(args, policy_path):
     n_envs = env_cfg.env.num_envs
     student_policy = StudentPolicy(n_envs, actor_critic, device=env.device)
 
-    optimizer = torch.optim.Adam(student_policy.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(student_policy.parameters(), lr=3e-3)
     
     j = 0
     total_loss = 0
@@ -66,8 +66,12 @@ def play(args, policy_path):
     noise_vec[12:24] = noise_scales.dof_pos * noise_level * obs_scales.dof_pos
     noise_vec[24:36] = noise_scales.dof_vel * noise_level * obs_scales.dof_vel
     noise_vec = noise_vec.to(env.device)
+    
+    n_steps = 50*int(env.max_episode_length)
+    
+    learning_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, n_steps, eta_min=1e-9)
 
-    for i in tqdm.tqdm(range(10*int(env.max_episode_length))):
+    for i in tqdm.tqdm(range(50*int(env.max_episode_length))):
         j += 1
 
         # Unpack observation
@@ -93,8 +97,8 @@ def play(args, policy_path):
 
         # Generate student policy output
         action_student, reconstructed_student = student_policy(proprioceptive_with_noise, exteroceptive_with_noise)
-        # env.draw_spheres(x_points, y_points, z_points, reset=True)
-        # env.draw_spheres(x_points, y_points, exteroceptive_from_decoded(reconstructed_student.detach())[0,:].view(-1), reset=False, color=(0,0,1))
+        env.draw_spheres(x_points, y_points, z_points, reset=True)
+        env.draw_spheres(x_points, y_points, exteroceptive_from_decoded(reconstructed_student.detach())[0,:].view(-1), reset=False, color=(0,0,1))
 
         # What would the teacher do?
         with torch.no_grad():
@@ -118,7 +122,7 @@ def play(args, policy_path):
         reconstruction_loss = nn.functional.mse_loss(reconstructed_student, reconstructed_target)
 
         # Calculate total loss
-        loss = action_loss + 0.6 * reconstruction_loss
+        loss = action_loss + 0.5 * reconstruction_loss
 
         # Book keeping
         loss.backward(retain_graph=True)
@@ -135,13 +139,15 @@ def play(args, policy_path):
             optimizer.zero_grad()
 
         # Learning rate schedule
-        if not lr_updated and i > 7*int(env.max_episode_length):
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = 3e-5
-            lr_updated = True
+        # if not lr_updated and i > 20*int(env.max_episode_length):
+        #     for param_group in optimizer.param_groups:
+        #         param_group['lr'] = 1e-4
+        #     lr_updated = True
 
         # Reset student policy RNN computational graph
         student_policy.reset(dones)
+        
+        learning_schedule.step()
 
     print(f"Storing distilled policy at {policy_path}")
     student_policy.save_weights(policy_path)

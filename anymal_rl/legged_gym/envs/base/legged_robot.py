@@ -166,7 +166,7 @@ class LeggedRobot(BaseTask):
         # self.last_root_vel[:] = self.root_states[:, 7:13]
 
         # update DOF residual history buffer
-        self.dof_residuals_history[self.dof_residual_idx, :] = self.dof_pos[:] - self.default_dof_pos
+        self.dof_residuals_history[self.dof_residual_idx, :] = self.dof_pos[:] - (self.default_dof_pos if self.aik.tt is None else self.aik.tt)
         self.dof_residual_idx = (self.dof_residual_idx + 1) % self.dof_residuals_history_length
 
         # Update DOF velocity history buffer
@@ -283,7 +283,7 @@ class LeggedRobot(BaseTask):
                                     self.projected_gravity,   # body orientation
                                     self.base_lin_vel * self.obs_scales.lin_vel,  # body velocity
                                     self.base_ang_vel  * self.obs_scales.ang_vel,  # body velocity
-                                    (self.dof_pos  - self.default_dof_pos) * self.obs_scales.dof_pos,  # joint position
+                                    (self.dof_pos  - (self.default_dof_pos if self.aik.tt is None else self.aik.tt)) * self.obs_scales.dof_pos,  # joint position
                                     self.dof_vel * self.obs_scales.dof_vel, # joint velocity
                                     *[self.dof_residuals_history[idx] * self.obs_scales.dof_pos for idx in dof_res_indices],  # joint position history
                                     *[self.dof_velocity_history[idx] * self.obs_scales.dof_vel for idx in vel_indices],     # joint velocity history
@@ -504,6 +504,8 @@ class LeggedRobot(BaseTask):
             leg_heights = self.cpg.leg_heights(phase_offsets)
             joint_angles = self.aik.compute_ik(leg_heights)
 
+            self.aik.tt = self.aik.compute_ik(self.cpg.leg_heights()) + dof_residuals
+
             torques = self.p_gains[:12]*(dof_residuals + joint_angles - self.dof_pos) - self.d_gains[:12]*self.dof_vel
         else:
             raise NameError(f"Unknown controller type: {control_type}")
@@ -569,7 +571,7 @@ class LeggedRobot(BaseTask):
             return
         distance = torch.norm(self.root_states[env_ids, :2] - self.env_origins[env_ids, :2], dim=1)
         # robots that walked far enough progress to harder terains
-        move_up = distance > self.terrain.env_length / 3
+        move_up = distance > self.terrain.env_length / 2.4
         # robots that walked less than half of their required distance go to simpler terrains
         move_down = (distance < torch.norm(self.commands[env_ids, :2], dim=1)*self.max_episode_length_s*0.5) * ~move_up
         self.terrain_levels[env_ids] += 1 * move_up - 1 * move_down

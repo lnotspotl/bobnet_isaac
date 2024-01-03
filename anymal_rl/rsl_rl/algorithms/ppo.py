@@ -78,6 +78,8 @@ class PPO:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
+        self.updates = 0
+
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
 
@@ -118,6 +120,17 @@ class PPO:
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
+
+        def update_kl():
+            if self.updates < 300:
+                return 0.02
+            elif self.updates < 900:
+                return 0.01
+            else:
+                return 0.005
+
+        self.desired_kl = update_kl()
+
         mean_value_loss = 0
         mean_surrogate_loss = 0
         if self.actor_critic.is_recurrent:
@@ -183,5 +196,7 @@ class PPO:
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
         self.storage.clear()
+
+        self.updates += 1
 
         return mean_value_loss, mean_surrogate_loss

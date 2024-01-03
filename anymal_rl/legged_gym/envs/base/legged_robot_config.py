@@ -45,7 +45,7 @@ class LeggedRobotCfg(BaseConfig):
         horizontal_scale = 0.1 # [m]
         vertical_scale = 0.005 # [m]
         border_size = 25 # [m]
-        curriculum = True
+        curriculum = False
         static_friction = 1.0
         dynamic_friction = 1.0
         restitution = 0
@@ -162,8 +162,8 @@ class LeggedRobotCfg(BaseConfig):
             ang_vel = 0.25
             dof_pos = 1.0
             dof_vel = 0.05
-            height_measurements = 5.0
-            contact_forces = 1/600
+            height_measurements = 1.0
+            contact_forces = 1/500
         clip_observations = 100.
         clip_actions = 100.
 
@@ -218,17 +218,17 @@ class LeggedRobotCfgPPO(BaseConfig):
         
     class algorithm:
         # training params
-        value_loss_coef = 1.0
-        use_clipped_value_loss = True
+        value_loss_coef = 0.7
+        use_clipped_value_loss = False
         clip_param = 0.2
         entropy_coef = 0.005
         num_learning_epochs = 5
-        num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
+        num_mini_batches = 16 # mini batch size = num_envs*nsteps / nminibatches
         learning_rate = 5.e-4 #5.e-4
         schedule = 'adaptive' # could be adaptive, fixed
         gamma = 0.99
         lam = 0.95
-        desired_kl = 0.01
+        desired_kl = 0.02
         max_grad_norm = 1.
 
     class runner:
