@@ -46,15 +46,15 @@ class SpotTeacherConfig( LeggedRobotCfg ):
             "RF_HAA": -0.0,
             "RH_HAA": -0.0,
 
-            "LF_HFE": 0.75,
-            "LH_HFE": 0.75,
-            "RF_HFE": 0.75,
-            "RH_HFE": 0.75,
+            "LF_HFE": 0.90,
+            "LH_HFE": 1.05,
+            "RF_HFE": 0.90,
+            "RH_HFE": 1.05,
 
-            "LF_KFE": 1.65,
-            "LH_KFE": 1.65,
-            "RF_KFE": 1.65,
-            "RH_KFE": 1.65,
+            "LF_KFE": -1.70,
+            "LH_KFE": -1.70,
+            "RF_KFE": -1.70,
+            "RH_KFE": -1.70,
         }
 
     class control( LeggedRobotCfg.control ):

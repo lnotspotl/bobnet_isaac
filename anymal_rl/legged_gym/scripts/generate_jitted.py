@@ -13,7 +13,7 @@ from noise_model import ExteroceptiveNoiseGenerator
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Distill policy with noise model')
-    parser.add_argument('--policy_path', type=str, help='Path where to store the distilled policy')
+    parser.add_argument('--policy-path', type=str, help='Path where to store the distilled policy')
     args, unknown = parser.parse_known_args()
     policy_path = args.policy_path
     return policy_path
@@ -37,7 +37,7 @@ def play(args, policy_path):
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
-    policy = ppo_runner.get_inference_policy(device=env.device)
+    # policy = ppo_runner.get_inference_policy(device=env.device)
 
     actor_critic = ppo_runner.alg.actor_critic
 
@@ -46,7 +46,7 @@ def play(args, policy_path):
 
     student_jitted = StudentPolicyJitted(actor_critic)
     student_jitted.load_from_file(policy_path)
-    student_jitted.student_policy.belief_encoder.hidden = torch.zeros(1, 2048)
+    # student_jitted.student_policy.belief_encoder.hidden = torch.zeros(1, 2048)
     student_jitted.to("cpu")
 
     jitted = torch.jit.script(student_jitted)

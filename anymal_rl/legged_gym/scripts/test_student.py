@@ -53,12 +53,12 @@ def play(args):
     actor_critic = ppo_runner.alg.actor_critic
 
     n_envs = env_cfg.env.num_envs
-    student_policy = StudentPolicy(200, actor_critic, device=env.device)
+    student_policy = StudentPolicy(1024, actor_critic, device=env.device)
 
-    student_policy_path = "distilled_policy_jittable.pt"
+    student_policy_path = "anymal_c_teacher_06.pt"
     student_policy.load_weights(student_policy_path)
     print(f"loaded weights from {student_policy_path}")
-    student_policy.belief_encoder.hidden = torch.zeros(n_envs, 2048).to(env.device)
+    student_policy.belief_encoder.hidden = torch.zeros(2, n_envs, 50).to(env.device)
     student_policy.belief_encoder.n_envs = n_envs
     
     noise_generator = ExteroceptiveNoiseGenerator(52, env_cfg.env.num_envs, env.max_episode_length, n_legs=4)
@@ -75,7 +75,7 @@ def play(args):
         y_points = points[0,:,1].view(-1)
         z_points = exteroceptive_with_noise[0, :].view(-1)
 
-
+        print(env.last_actions[0])
 
         # priviliged = priviliged_from_observation(obs)
 

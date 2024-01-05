@@ -110,7 +110,7 @@ class AnymalInverseKinematics:
 
 class SpotInverseKinematics:
     def __init__(self, device = "cpu"):
-        height = 0.5
+        height = 0.46
         self.device = device
 
         self.d2 = 0.1108
@@ -118,10 +118,10 @@ class SpotInverseKinematics:
         self.a4 = 0.335
 
         self.default_positions = torch.Tensor([
-             0.00790786, 0.05720384, -height,  # LF
-            -0.00790786, 0.05720384, -height,  # LH
-             0.00790786, -0.05720384, -height, # RF
-            -0.00790786, -0.05720384, -height  #  RH
+             0.00490786, 0.1108, -height,  # LF
+            -0.06, 0.1108, -height,  # LH
+             0.00490786, -0.1108, -height, # RF
+            -0.06, -0.1108, -height  #  RH
         ]).to(self.device)
 
     def compute_ik(self, heights):

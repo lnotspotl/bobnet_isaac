@@ -136,24 +136,24 @@ class LeggedRobotCfg(BaseConfig):
             lin_vel_z = -2.0
             ang_vel_xy = -0.05
             orientation = -0.
-            torques = -0.00001
+            torques = -0.00002
             dof_vel = -0.003 * 0.02
             dof_acc = -2.5e-7
             base_height = -0.003 * 0.02
             feet_air_time =  1.0
             collision = -1.
-            stumble = -0.1
-            action_rate = -0.01
+            stumble = -0.3
+            action_rate = -0.02
             stand_still = 0.0
             smoothness = -0.005
-            swing_height = -0.003
+            swing_height = -0.005
 
         only_positive_rewards = False # if true negative total rewards are clipped at zero (avoids early termination problems)
         tracking_sigma = 0.25 # tracking reward = exp(-error^2/sigma)
         soft_dof_pos_limit = 1. # percentage of urdf limits , values above this limit are penalized
         soft_dof_vel_limit = 1.
         soft_torque_limit = 1.
-        base_height_target = 1.
+        base_height_target = 0.53
         max_contact_force = 100. # forces above this value are penalized
 
     class normalization:
@@ -162,7 +162,7 @@ class LeggedRobotCfg(BaseConfig):
             ang_vel = 0.25
             dof_pos = 1.0
             dof_vel = 0.05
-            height_measurements = 5.0
+            height_measurements = 1.0
             contact_forces = 1/600
         clip_observations = 100.
         clip_actions = 100.

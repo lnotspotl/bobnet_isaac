@@ -85,7 +85,7 @@ class Terrain:
     def curiculum(self):
         for j in range(self.cfg.num_cols):
             for i in range(self.cfg.num_rows):
-                difficulty = i / self.cfg.num_rows
+                difficulty = 1.0 * i / self.cfg.num_rows
                 choice = j / self.cfg.num_cols + 0.001
 
                 terrain = self.make_terrain(choice, difficulty)

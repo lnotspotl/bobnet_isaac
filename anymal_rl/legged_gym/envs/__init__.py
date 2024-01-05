@@ -40,7 +40,7 @@ from .cassie.cassie import Cassie
 from .cassie.cassie_config import CassieRoughCfg, CassieRoughCfgPPO
 from .a1.a1_config import A1RoughCfg, A1RoughCfgPPO
 
-from .anymal_c.teacher.anymal_teacher_config import AnymalTeacherConfig, AnymalTeacherPpoConfig
+from .anymal_c.teacher.anymal_c_teacher_config import AnymalTeacherConfig, AnymalTeacherPpoConfig
 from .anymal_c.student.anymal_student_config import AnymalStudentConfig, AnymalStudentPpoConfig
 from .spot.teacher.spot_teacher_config import SpotTeacherConfig, SpotTeacherPpoConfig
 
