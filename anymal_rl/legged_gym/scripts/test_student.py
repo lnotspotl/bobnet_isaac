@@ -55,7 +55,7 @@ def play(args):
     n_envs = env_cfg.env.num_envs
     student_policy = StudentPolicy(1024, actor_critic, device=env.device)
 
-    student_policy_path = "anymal_c_teacher_06.pt"
+    student_policy_path = "spot2.pt"
     student_policy.load_weights(student_policy_path)
     print(f"loaded weights from {student_policy_path}")
     student_policy.belief_encoder.hidden = torch.zeros(2, n_envs, 50).to(env.device)
@@ -75,7 +75,7 @@ def play(args):
         y_points = points[0,:,1].view(-1)
         z_points = exteroceptive_with_noise[0, :].view(-1)
 
-        print(env.last_actions[0])
+        # print(env.last_actions[0])
 
         # priviliged = priviliged_from_observation(obs)
 
@@ -88,8 +88,8 @@ def play(args):
         # print(torch.abs(extero_diff).mean())
 
         obs, _, rews, dones, infos = env.step(action_student)
-        env.draw_spheres(x_points, y_points, z_points, reset=True)
-        env.draw_spheres(x_points, y_points, exteroceptive_from_decoded(reconstructed_student.detach())[0,:].view(-1), reset=False, color=(0,0,1))
+        # env.draw_spheres(x_points[:52], y_points[:52], z_points[:52], reset=True)
+        env.draw_spheres(x_points[:52], y_points[:52], exteroceptive_from_decoded(exteroceptive.detach())[0,:].view(-1)[:52], reset=True, color=(0,0,1))
         student_policy.reset(dones)
 
 if __name__ == '__main__':

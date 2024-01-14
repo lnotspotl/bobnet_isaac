@@ -29,7 +29,7 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 from anymal_rl.legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
-
+    
 class SpotTeacherConfig( LeggedRobotCfg ):
     class env( LeggedRobotCfg.env ):
         num_envs = 4096
@@ -71,10 +71,10 @@ class SpotTeacherConfig( LeggedRobotCfg ):
     class asset( LeggedRobotCfg.asset ):
         file = "/home/kuba/fun/anymal_rl/resources/spot_description/spot_description/urdf/spot.urdf"
         name = "spot"
-        foot_name = "lleg"
+        foot_name = "FOOT"
         shank_name = "uleg"
-        thigh_name = "hip"
-        penalize_contacts_on = ["uleg", "hip"]
+        thigh_name = "lleg"
+        penalize_contacts_on = ["uleg", "lleg"]
         terminate_after_contacts_on = ["base"]
         self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
 

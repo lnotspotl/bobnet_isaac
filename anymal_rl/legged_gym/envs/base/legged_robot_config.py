@@ -136,17 +136,18 @@ class LeggedRobotCfg(BaseConfig):
             lin_vel_z = -2.0
             ang_vel_xy = -0.05
             orientation = -0.
-            torques = -0.00002
+            torques = -0.00001
             dof_vel = -0.003 * 0.02
             dof_acc = -2.5e-7
             base_height = -0.003 * 0.02
             feet_air_time =  1.0
             collision = -1.
-            stumble = -0.3
+            stumble = -0.1
             action_rate = -0.02
             stand_still = 0.0
             smoothness = -0.005
-            swing_height = -0.005
+            swing_height = -0.003
+            action_norm = -0.0001
 
         only_positive_rewards = False # if true negative total rewards are clipped at zero (avoids early termination problems)
         tracking_sigma = 0.25 # tracking reward = exp(-error^2/sigma)

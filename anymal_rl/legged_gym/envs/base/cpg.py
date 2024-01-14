@@ -110,7 +110,7 @@ class AnymalInverseKinematics:
 
 class SpotInverseKinematics:
     def __init__(self, device = "cpu"):
-        height = 0.46
+        height = 0.55
         self.device = device
 
         self.d2 = 0.1108
