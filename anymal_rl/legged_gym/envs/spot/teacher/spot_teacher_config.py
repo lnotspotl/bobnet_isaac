@@ -33,7 +33,7 @@ from anymal_rl.legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, L
 class SpotTeacherConfig( LeggedRobotCfg ):
     class env( LeggedRobotCfg.env ):
         num_envs = 4096
-        num_actions = 16
+        num_actions = 12
 
     class terrain( LeggedRobotCfg.terrain ):
         mesh_type = 'trimesh'
@@ -69,7 +69,7 @@ class SpotTeacherConfig( LeggedRobotCfg ):
         actuator_net_file = "{LEGGED_GYM_ROOT_DIR}/resources/actuator_nets/anydrive_v3_lstm.pt"
 
     class asset( LeggedRobotCfg.asset ):
-        file = "/home/kuba/fun/anymal_rl/resources/spot_description/spot_description/urdf/spot.urdf"
+        file = "/home/kuba/fun/anymal_rl/resources/spot_description/urdf/spot.urdf"
         name = "spot"
         foot_name = "FOOT"
         shank_name = "uleg"

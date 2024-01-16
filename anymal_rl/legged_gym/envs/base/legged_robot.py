@@ -102,10 +102,6 @@ class LeggedRobot(BaseTask):
         
         clip_actions = self.cfg.normalization.clip_actions
 
-        if actions.shape[1] != 16:
-            actions = torch.zeros((self.num_envs, 16), device=self.device)
-
-
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
         # step physics and render each frame
         self.render()
@@ -497,15 +493,8 @@ class LeggedRobot(BaseTask):
             torques = actions_scaled
         elif control_type=="CPG":
 
-            if actions_scaled.shape[1] != 16:
-                phase_offsets = torch.zeros(self.num_envs, 4, device=self.device)
-                dof_residuals = actions_scaled
-            else:
-                phase_offsets = actions_scaled[:, :4]
-                dof_residuals = actions_scaled[:, 4:]
-
-            leg_heights = self.cpg.leg_heights(phase_offsets)
-            joint_angles = self.aik.compute_ik(leg_heights)
+            dof_residuals = actions_scaled
+            joint_angles = self.aik.compute_ik(self.cpg.leg_heights())
             
             self.aik.tt = self.aik.compute_ik(self.cpg.leg_heights())
 
@@ -686,7 +675,7 @@ class LeggedRobot(BaseTask):
 
         # Action history
         DOF_ACTION_HISTORY_LENGTH = 2
-        CRITIC_OUT = 16
+        CRITIC_OUT = 12
         DOF_ACTION_BUFFER_SIZE = (DOF_ACTION_HISTORY_LENGTH, self.num_envs, CRITIC_OUT)
         self.dof_action_history = torch.zeros(
             DOF_ACTION_BUFFER_SIZE, dtype=torch.float, device=self.device, requires_grad=False
@@ -711,7 +700,7 @@ class LeggedRobot(BaseTask):
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
-        self.torques = torch.zeros(self.num_envs, self.num_actions-4, dtype=torch.float, device=self.device, requires_grad=False)
+        self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)

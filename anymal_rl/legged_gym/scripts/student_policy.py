@@ -6,7 +6,7 @@ import torch.nn as nn
 import copy
 
 # hardcoded constants - TODO: remove these
-proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
+proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 12 + 8
 exteroceptive_latent_size = 4 * 24
 priviliged_latent_size = 24
 hidden_size = 50
@@ -177,7 +177,7 @@ class StudentPolicyJitted(nn.Module):
         super().__init__()
         self.student_policy = StudentPolicy(1024, teacher_policy)
 
-        proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
+        proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 12 + 8
         exteroceptive_latent_size = 4 * 24
         priviliged_latent_size = 24
         hidden_size = 512
@@ -187,7 +187,7 @@ class StudentPolicyJitted(nn.Module):
         # self.register_buffer(f'hidden', torch.zeros(1, hidden_size))
 
     def forward(self, observation):
-        proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 16 + 8
+        proprioceptive_size = 3 + 3 + 3 + 3 + 12 + 12 + 3*12 + 2 * 12 + 2 * 12 + 8
         exteroceptive_latent_size = 4 * 24
         priviliged_latent_size = 24
         hidden_size = 512

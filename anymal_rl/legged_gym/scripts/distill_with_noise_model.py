@@ -67,7 +67,7 @@ def play(args, policy_path):
     noise_vec[24:36] = noise_scales.dof_vel * noise_level * obs_scales.dof_vel
     noise_vec = noise_vec.to(env.device)
     
-    n_steps = 25*int(env.max_episode_length)
+    n_steps = 40*int(env.max_episode_length)
     
     learning_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, n_steps, eta_min=1e-9)
 

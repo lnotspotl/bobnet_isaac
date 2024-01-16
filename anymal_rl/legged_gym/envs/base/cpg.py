@@ -118,10 +118,10 @@ class SpotInverseKinematics:
         self.a4 = 0.335
 
         self.default_positions = torch.Tensor([
-             0.00490786, 0.1108, -height,  # LF
-            -0.06, 0.1108, -height,  # LH
-             0.00490786, -0.1108, -height, # RF
-            -0.06, -0.1108, -height  #  RH
+             0.0, 0.1108, -height,  # LF
+            -0.0, 0.1108, -height,  # LH
+             0.0, -0.1108, -height, # RF
+            -0.0, -0.1108, -height  #  RH
         ]).to(self.device)
 
     def compute_ik(self, heights):
