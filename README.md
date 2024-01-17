@@ -3,19 +3,15 @@
 ## Teacher policy training
 
 ```bash
-python3 scripts/train.py --task=anymal_c_teacher --experiment=experiment_name
+python3 scripts/train.py --task=... --experiment=...
 ```
-
-So far, the best policy is `ar5`
 
 ## Student policy training
 
 ```bash
-python3 scripts/distill_with_noise_model.py --task=anymal_c_teacher --experiment=experiment_name
+python3 scripts/distill_with_noise_model.py --task=... --experiment=... --policy-path=...
 ```
 
-To later view the distilled policy, simply run the following command
-
-```bash
-python3 scripts/test_student.py
-```
+# Credits
+This repository is based on `legged_gym` from RSL at ETH: https://github.com/leggedrobotics/legged_gym
+They are given full credit, I've merely made a couple of changes.
