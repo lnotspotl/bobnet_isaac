@@ -1,4 +1,4 @@
-# anymal_rl
+# bobnet_isaac
 
 ## Teacher policy training
 
