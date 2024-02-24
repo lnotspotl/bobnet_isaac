@@ -55,7 +55,7 @@ def play(args):
     n_envs = env_cfg.env.num_envs
     student_policy = StudentPolicy(1024, actor_critic, device=env.device)
 
-    student_policy_path = "testtest.pt"
+    student_policy_path = "swing_clearange.pt"
     student_policy.load_weights(student_policy_path)
     print(f"loaded weights from {student_policy_path}")
     student_policy.belief_encoder.hidden = torch.zeros(2, n_envs, 50).to(env.device)

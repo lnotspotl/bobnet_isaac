@@ -86,7 +86,7 @@ class SpotTeacherConfig( LeggedRobotCfg ):
         added_mass_range = [-5., 5.]
   
     class rewards( LeggedRobotCfg.rewards ):
-        base_height_target = 0.5
+        base_height_target = 0.55
         max_contact_force = 500.
         only_positive_rewards = True
         class scales( LeggedRobotCfg.rewards.scales ):

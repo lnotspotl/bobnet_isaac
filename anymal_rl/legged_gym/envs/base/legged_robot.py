@@ -626,6 +626,8 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)  # kuba
+        
+        self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)
 
         # kuba
 
@@ -1232,13 +1234,32 @@ class LeggedRobot(BaseTask):
         # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
         contact = self.contact_forces[:, self.feet_indices, 2] > 1.
         contact_filt = torch.logical_or(contact, self.last_contacts) 
-        self.last_contacts = contact
         first_contact = (self.feet_air_time > 0.) * contact_filt
         self.feet_air_time += self.dt
         rew_airTime = torch.sum((self.feet_air_time - 0.3) * first_contact, dim=1) # reward only on first contact with the ground
         # rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
         self.feet_air_time *= ~contact_filt
-        return rew_airTime
+        
+        # Need to filter the contacts because the contact reporting of PhysX is
+        # unreliable on meshes.
+        feet_positions = self.rigid_body_state[:, self.feet_indices, 0:3]
+        # Turns base_heights into a batch x 1 x 3 vector.
+        base_position = self.root_states[:, :3].unsqueeze(1)
+        local_feet_positions = feet_positions - base_position
+
+        # We assume that the local feet positions are negative in the base frame
+        # The clearance reward is larger when the swing legs are higher.
+        rew_clearance = (
+            local_feet_positions[:, :, 2] + self.cfg.rewards.base_height_target - 0.2)
+
+        # Only apply to swing legs. TODO(tingnan): extract this to a common api.
+        # contact_filt is a [batch, 4] array. A foot is on the ground only if the
+        # contact force exceed 10 N in the z-direction.
+        self.last_contacts = contact
+        rew_clearance *= ~contact_filt
+        rew_clearance = torch.sum(rew_clearance, dim=1)
+
+        return rew_airTime + self.ck * 0.2 * rew_clearance
     
     def _reward_stumble(self):
         # Penalize feet hitting vertical surfaces
@@ -1279,9 +1300,42 @@ class LeggedRobot(BaseTask):
     
     def _reward_action_norm(self):
         return torch.norm(self.actions, dim=1)
+    
+    def _reward_feet_clearance(self):
+        """A reward term to encourage larger feet clearances."""
+        # Need to filter the contacts because the contact reporting of PhysX is
+        # unreliable on meshes.
+        feet_positions = self.rigid_body_state[:, self.feet_indices, 0:3]
+        # Turns base_heights into a batch x 1 x 3 vector.
+        base_position = self.root_states[:, :3].unsqueeze(1)
+        local_feet_positions = feet_positions - base_position
+        tensor_shape = local_feet_positions.shape
+        # Transform from [batch, num_feet, 3] to [batch x num_feet, 3].
+        local_feet_positions = local_feet_positions.reshape(-1, 3)
+        quat = self.base_quat.repeat(1, 4).reshape(-1, 4)
+        local_feet_positions = quat_rotate_inverse(
+            quat, local_feet_positions).reshape(tensor_shape)
+
+        # We assume that the local feet positions are negative in the base frame
+        # The clearance reward is larger when the swing legs are higher.
+        rew_clearance = (
+            local_feet_positions[:, :, 2] + self.cfg.rewards.base_height_target - 0.04)
+        rew_clearance = torch.clip(rew_clearance, max=0.075)
+
+        # Only apply to swing legs. TODO(tingnan): extract this to a common api.
+        # contact_filt is a [batch, 4] array. A foot is on the ground only if the
+        # contact force exceed 10 N in the z-direction.
+        contact = self.contact_forces[:, self.feet_indices,
+                                      2] > 2.0  # Newton
+        contact_filt = torch.logical_or(contact, self.last_contacts)
+        self.last_contacts = contact
+        rew_clearance *= ~contact_filt
+        rew_clearance = torch.sum(rew_clearance, dim=1)
+
+        return rew_clearance
 
     def update_curriculum(self):
-        CURRICULUM_UPDATES = 10000.0
+        CURRICULUM_UPDATES = 11000.0
 
         if self.iter == CURRICULUM_UPDATES:
             print("Done curriculum")
